@@ -40,4 +40,8 @@ COPY ./app /app/app
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync
 
-CMD ["fastapi", "run", "--workers", "4", "app/main.py"]
+# Make the prestart script executable
+RUN chmod +x /app/scripts/prestart.sh
+
+# The command to run the application
+CMD ["/bin/bash", "-c", "/app/scripts/prestart.sh && fastapi run --workers 4 app/main.py"]
