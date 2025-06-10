@@ -14,14 +14,20 @@ from app.tests.utils.utils import get_superuser_token_headers
 
 @pytest.fixture(scope="session", autouse=True)
 def db() -> Generator[Session, None, None]:
+    # Initialize the database (creates tables and initial data if needed)
+    init_db()
+    
+    # Get a new session for testing
     with Session(engine) as session:
-        init_db(session)
-        yield session
+        # Clean up any existing data
         statement = delete(Item)
         session.execute(statement)
         statement = delete(User)
         session.execute(statement)
         session.commit()
+        
+        # Yield the session for tests to use
+        yield session
 
 
 @pytest.fixture(scope="module")
