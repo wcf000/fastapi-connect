@@ -40,4 +40,12 @@ COPY ./app /app/app
 RUN --mount=type=cache,target=/root/.cache/uv \
     uv sync
 
-CMD ["fastapi", "run", "--workers", "4", "app/main.py"]
+# Expose port 10000 for Render
+EXPOSE 10000
+
+# Set environment variables for FastAPI
+ENV HOST=0.0.0.0
+ENV PORT=10000
+
+# Run the FastAPI app with Uvicorn
+CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "10000", "--workers", "4"]

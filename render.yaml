@@ -1,0 +1,55 @@
+services:
+  - type: web
+    name: fastapi-backend
+    env: docker
+    build:
+      dockerfile: ./backend/Dockerfile
+      context: .
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: POSTGRES_SERVER
+        fromDatabase:
+          name: fastapi-db
+          property: connectionString
+          regex: host=([^ ]+)
+      - key: POSTGRES_DB
+        fromDatabase:
+          name: fastapi-db
+          property: connectionString
+          regex: dbname=([^ ]+)
+      - key: POSTGRES_USER
+        fromDatabase:
+          name: fastapi-db
+          property: connectionString
+          regex: user=([^ ]+)
+      - key: POSTGRES_PASSWORD
+        fromDatabase:
+          name: fastapi-db
+          property: connectionString
+          regex: password=([^ ]+)
+    healthCheckPath: /api/v1/health
+    numInstances: 1
+    plan: free
+
+  - type: web
+    name: fastapi-frontend
+    env: docker
+    build:
+      dockerfile: ./frontend/Dockerfile
+      context: .
+    envVars:
+      - key: VITE_API_URL
+        value: https://full-stack-fastapi-template-bvfx.onrender.com
+    routes:
+      - type: rewrite
+        source: /api/*
+        destination: https://full-stack-fastapi-template-bvfx.onrender.com/api/$1
+    numInstances: 1
+    plan: free
+
+databases:
+  - name: fastapi-db
+    databaseName: fastapi_db
+    user: fastapi_user
+    plan: free

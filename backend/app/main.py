@@ -1,3 +1,4 @@
+import os
 import sentry_sdk
 from fastapi import FastAPI
 from fastapi.routing import APIRoute
@@ -31,3 +32,7 @@ if settings.all_cors_origins:
     )
 
 app.include_router(api_router, prefix=settings.API_V1_STR)
+
+# Get host and port from environment variables
+HOST = os.getenv("HOST", "0.0.0.0")
+PORT = int(os.getenv("PORT", 8000))
