@@ -1,0 +1,134 @@
+graph TD
+    A[Start Using Redis Integration] --> B[Configure via config py RedisConfig Env Vars];
+    B --> C[Get Async Client Singleton via client py];
+
+    subgraph RedisActions
+        direction LR
+        D{Choose Action};
+        C --> D;
+
+        D -- Caching --> E{Cache Method?};
+            E -- Basic Ops --> F[Use redis_cache py get set delete flush stats];
+            E -- Decorator Simple --> G[Use redis_cache py ATcache_result];
+            E -- Decorator Advanced --> H[Use decorators py ATget_or_set_cache Background Refresh Stale];
+            E -- Batch Warm --> I[Use decorators py warm_cache];
+            E -- Invalidation --> J[Use decorators py invalidate_cache];
+
+        D -- Rate Limiting --> K{Rate Limit Method?};
+            K -- High Level --> L[Use rate_limit py verify_and_limit];
+            K -- Low Level --> M[Use rate_limit py check_rate_limit];
+            K -- Internal --> N[Use rate_limit py service_rate_limit];
+
+        D -- Health Check --> O{Health Method?};
+             O -- Get Status --> P[Use health_check py RedisHealth get_health_status];
+             O -- API Endpoint --> Q[Access /health/redis Endpoint];
+
+        D -- Utility --> R{Utility Function?};
+             R -- Get Client --> S[Use decorators py get_redis_client];
+             R -- Get Cache --> T[Use redis_cache py get_redis_cache];
+    end
+
+    subgraph CoreModules
+        direction TB
+        V[config py Settings];
+        W[client py Async Client];
+        X[redis_cache py Basic Ops ATcache_result get_redis_cache];
+        Y[decorators py ATget_or_set ATinvalidate warm_cache get_redis_client];
+        Z[rate_limit py Rate Limit Utilities];
+        AA[health_check py Health Checker];
+    end
+
+    subgraph ExternalSystems
+        BB[Redis Server];
+        CC[Prometheus Server];
+    end
+
+    subgraph BestPracticesAndTesting
+        direction TB
+        DD[Remember Best Practices Async Prefixes Config TTLs];
+        EE[Avoid Anti Patterns Sync Hardcoding Ignore Errors];
+        FF[Testing Mock Client Clean Data];
+    end
+
+    %% Module Dependencies
+    B --> V;
+    C --> W;
+    F --> X;
+    G --> X;
+    H --> Y;
+    I --> Y;
+    J --> Y;
+    L --> Z;
+    M --> Z;
+    N --> Z;
+    P --> AA;
+    Q --> AA;
+    %% Endpoint uses health check logic
+    S --> Y;
+    T --> X;
+
+    %% Configuration Usage
+    W --> V;
+    %% Client uses config
+    X --> V;
+    %% Cache might use config e g default TTL
+    Y --> V;
+    %% Decorators use config
+    Z --> V;
+    %% Rate Limiter uses config
+    AA --> V;
+    %% Health Check uses config
+
+    %% Interaction with Redis Server
+    F --> BB;
+    G --> BB;
+    H --> BB;
+    I --> BB;
+    J --> BB;
+    L --> BB;
+    M --> BB;
+    N --> BB;
+    P --> BB;
+    %% Health check pings Redis
+    S --> BB;
+    %% Getting client implies potential interaction
+    T --> BB;
+    %% Getting cache implies potential interaction
+
+    %% Metrics Generation
+    F -- Generates Metrics --> CC;
+    G -- Generates Metrics --> CC;
+    H -- Generates Metrics --> CC;
+    I -- Generates Metrics --> CC;
+    J -- Generates Metrics --> CC;
+    L -- Generates Metrics --> CC;
+    %% Rate limit events
+    M -- Generates Metrics --> CC;
+    %% Rate limit events
+    N -- Generates Metrics --> CC;
+    %% Rate limit events
+    P -- Generates Metrics --> CC;
+    %% Health status latency
+    W -- Generates Metrics --> CC;
+    %% Connection pool circuit breaker stats
+
+    %% Monitoring and End Point
+    GG[Monitor Prometheus Observe Logs];
+    CC --> GG;
+    BB --> GG;
+    %% Monitor Redis server itself
+
+    HH[End Continuous Usage and Monitoring];
+    GG --> HH;
+
+    %% Linking Best Practices Testing Conceptual Links
+    A -.-> DD;
+    A -.-> EE;
+    A -.-> FF;
+
+    style CoreModules fill:#f9f,stroke:#333,stroke-width:1px
+    style ExternalSystems fill:#ccf,stroke:#333,stroke-width:1px
+    style RedisActions fill:#eee,stroke:#333,stroke-width:1px
+    style BestPracticesAndTesting fill:#lightgrey,stroke:#333,stroke-width:1px,stroke-dasharray: 5 5
+// [MermaidChart: 088f0da7-46f6-4137-8429-628d6269df8b]
+// [MermaidChart: 088f0da7-46f6-4137-8429-628d6269df8b]

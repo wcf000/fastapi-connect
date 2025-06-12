@@ -1,3 +1,4 @@
 [submodule "backend/app/core/redis"]
-	path = backend/app/core/redis
-	url = https://github.com/wcf000/redis-utilities.git
+    path = backend/app/core/redis
+    url = https://github.com/wcf000/redis-utilities.git
+    branch = bare_redis
