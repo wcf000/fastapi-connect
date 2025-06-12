@@ -1,0 +1,3 @@
+[submodule "backend/app/core/redis"]
+	path = backend/app/core/redis
+	url = https://github.com/TechWithTy/redis-utilities.git
