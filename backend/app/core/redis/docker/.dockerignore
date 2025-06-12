@@ -1,3 +1,0 @@
-# Exclude all documentation folders from Docker builds
-**/_docs
-*.md
