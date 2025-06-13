@@ -1,7 +1,7 @@
 from datetime import timedelta
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.security import OAuth2PasswordRequestForm
 
@@ -9,6 +9,7 @@ from app import crud
 from app.api.deps import CurrentUser, SessionDep, get_current_active_superuser
 from app.core import security
 from app.core.config import settings
+from app.core.redis.rate_limit import check_rate_limit
 from app.core.security import get_password_hash
 from app.models import Message, NewPassword, Token, UserPublic
 from app.utils import (
@@ -22,12 +23,27 @@ router = APIRouter(tags=["login"])
 
 
 @router.post("/login/access-token")
-def login_access_token(
-    session: SessionDep, form_data: Annotated[OAuth2PasswordRequestForm, Depends()]
+async def login_access_token(
+    request: Request,  # Add request parameter to get client IP
+    session: SessionDep,
+    form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
 ) -> Token:
     """
-    OAuth2 compatible token login, get an access token for future requests
+    OAuth2 compatible token login with rate limiting protection
     """
+    # Rate limit by IP address (5 attempts per minute)
+    client_ip = request.client.host
+    rate_limit_key = f"login:{client_ip}"
+
+    # Check if rate limited
+    is_allowed = await check_rate_limit(rate_limit_key, 5, 60)
+    if not is_allowed:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many login attempts. Please try again later.",
+        )
+
+    # Existing authentication logic
     user = crud.authenticate(
         session=session, email=form_data.username, password=form_data.password
     )
@@ -52,10 +68,25 @@ def test_token(current_user: CurrentUser) -> Any:
 
 
 @router.post("/password-recovery/{email}")
-def recover_password(email: str, session: SessionDep) -> Message:
+async def recover_password(
+    request: Request,
+    email: str,
+    session: SessionDep,
+) -> Message:
     """
-    Password Recovery
+    Password Recovery with rate limiting
     """
+    # Rate limit by IP (3 attempts per hour)
+    client_ip = request.client.host
+    rate_limit_key = f"pwd_recovery:{client_ip}"
+
+    is_allowed = await check_rate_limit(rate_limit_key, 3, 3600)
+    if not is_allowed:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many password recovery attempts. Please try again later."
+        )
+
     user = crud.get_user_by_email(session=session, email=email)
 
     if not user:
