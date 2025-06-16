@@ -1,66 +1,166 @@
-"""Caching dependencies for FastAPI routes"""
-
+"""
+Valkey cache utilities for the FastAPI application.
+Provides simple caching operations and decorators.
+"""
 import functools
-import logging
 import json
-from typing import Any, Callable
+import logging
+import random
+import asyncio
+from typing import Any, Callable, Optional, TypeVar
 
-from app.core.redis_init import redis_cache
+from app.core.valkey_init import get_valkey
 
 logger = logging.getLogger(__name__)
 
-def cache_response(ttl: int = 300, key_prefix: str = "api:"):
+T = TypeVar('T')
+
+class ValkeyCache:
+    """Wrapper for Valkey cache operations."""
+    
+    @staticmethod
+    async def get(key: str, default: Any = None) -> Any:
+        """Get a value from the cache."""
+        client = get_valkey()
+        if not client:
+            logger.warning(f"Valkey client not initialized. Cannot get key: {key}")
+            return default
+            
+        try:
+            value = await client.get(key)
+            if value is None:
+                return default
+            return value
+        except Exception as e:
+            logger.error(f"Error getting value from Valkey: {e}")
+            return default
+    
+    @staticmethod
+    async def set(key: str, value: Any, ttl: int = 3600) -> bool:
+        """Set a value in the cache with optional TTL."""
+        client = get_valkey()
+        if not client:
+            logger.warning(f"Valkey client not initialized. Cannot set key: {key}")
+            return False
+            
+        try:
+            return await client.set(key, value, ex=ttl)
+        except Exception as e:
+            logger.error(f"Error setting value in Valkey: {e}")
+            return False
+    
+    @staticmethod
+    async def delete(key: str) -> bool:
+        """Delete a key from the cache."""
+        client = get_valkey()
+        if not client:
+            logger.warning(f"Valkey client not initialized. Cannot delete key: {key}")
+            return False
+            
+        try:
+            result = await client.delete(key)
+            return result > 0
+        except Exception as e:
+            logger.error(f"Error deleting key from Valkey: {e}")
+            return False
+        
+    @staticmethod
+    async def exists(key: str) -> bool:
+        """Check if a key exists in the cache."""
+        client = get_valkey()
+        if not client:
+            logger.warning(f"Valkey client not initialized. Cannot check key: {key}")
+            return False
+            
+        try:
+            return await client.exists(key)
+        except Exception as e:
+            logger.error(f"Error checking key existence in Valkey: {e}")
+            return False
+
+
+def valkey_cache(ttl: int = 3600, key_prefix: str = "cache:"):
     """
-    Cache expensive API responses with Redis
+    Decorator for caching function results in Valkey.
     
     Args:
-        ttl: Cache TTL in seconds (default: 5 minutes)
-        key_prefix: Prefix for cache keys
-        
-    Usage:
-        @cache_response(ttl=600, key_prefix="users:")
-        async def get_user_data(user_id: int):
-            # Expensive database query...
-            return result
+        ttl: Time-to-live in seconds
+        key_prefix: Prefix for the cache key
     """
-    def decorator(func: Callable):
+    def decorator(func):
         @functools.wraps(func)
         async def wrapper(*args, **kwargs):
-            # Skip caching if Redis is not available
-            if not redis_cache:
-                return await func(*args, **kwargs)
-                
-            # Generate cache key from function name and arguments
-            cache_key = f"{key_prefix}{func.__name__}"
-            
-            # Add arguments to key
+            # Generate a cache key
+            key_parts = [key_prefix, func.__module__, func.__name__]
             if args:
-                cache_key += f":{':'.join(str(arg) for arg in args)}"
-            
-            # Add keyword arguments to key
+                key_parts.extend([str(arg) for arg in args])
             if kwargs:
-                sorted_kwargs = sorted(kwargs.items())
-                cache_key += f":{':'.join(f'{k}={v}' for k, v in sorted_kwargs)}"
+                for k, v in sorted(kwargs.items()):
+                    key_parts.append(f"{k}:{v}")
             
+            cache_key = ":".join(key_parts)
+            
+            # Try to get from cache
+            cached = await ValkeyCache.get(cache_key)
+            if cached is not None:
+                logger.debug(f"Cache hit for {cache_key}")
+                if isinstance(cached, str) and cached.startswith("{"):
+                    try:
+                        return json.loads(cached)
+                    except json.JSONDecodeError:
+                        pass
+                return cached
+            
+            # Cache miss, execute function
+            logger.debug(f"Cache miss for {cache_key}")
+            result = await func(*args, **kwargs)
+            
+            # Store in cache
             try:
-                # Try to get from cache
-                cached_result = await redis_cache.get(cache_key)
-                if cached_result is not None:
-                    logger.debug(f"Cache hit for {cache_key}")
-                    return cached_result
-                    
-                # Cache miss, execute function
-                logger.debug(f"Cache miss for {cache_key}")
-                result = await func(*args, **kwargs)
-                
-                # Cache the result
-                await redis_cache.set(cache_key, result, ttl=ttl)
-                return result
-                
+                if isinstance(result, (dict, list)):
+                    await ValkeyCache.set(cache_key, json.dumps(result), ttl)
+                else:
+                    await ValkeyCache.set(cache_key, result, ttl)
             except Exception as e:
-                # On error, fall back to the original function
-                logger.warning(f"Cache operation failed: {str(e)}. Falling back to uncached operation.")
-                return await func(*args, **kwargs)
+                logger.error(f"Error caching result: {e}")
                 
+            return result
+        
         return wrapper
+    
+    return decorator
+
+
+async def invalidate_cache_keys(*keys: str):
+    """Invalidate multiple cache keys."""
+    client = get_valkey()
+    if not client:
+        logger.warning("Valkey client not initialized. Cannot invalidate cache keys.")
+        return False
+        
+    try:
+        result = await client.delete(*keys)
+        logger.debug(f"Invalidated {result} cache keys")
+        return result > 0
+    except Exception as e:
+        logger.error(f"Error invalidating cache keys: {e}")
+        return False
+
+
+def invalidate_cache(*keys: str):
+    """
+    Decorator to invalidate cache keys after function execution.
+    
+    Args:
+        keys: Cache keys to invalidate
+    """
+    def decorator(func):
+        @functools.wraps(func)
+        async def wrapper(*args, **kwargs):
+            result = await func(*args, **kwargs)
+            await invalidate_cache_keys(*keys)
+            return result
+        
+        return wrapper
+    
     return decorator

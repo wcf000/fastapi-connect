@@ -1,35 +1,43 @@
-# In app/api/routes/health.py
-from fastapi import APIRouter, Depends
-from app.core.redis.client import client as redis_client
+from fastapi import APIRouter, Depends, HTTPException, status
+from pydantic import BaseModel
 
-# Change the prefix to match your API structure
-router = APIRouter(prefix="/health", tags=["health"])
+from app.core.valkey_init import get_valkey
 
-@router.get("/redis")
-async def check_redis_health():
+router = APIRouter()
+
+class HealthStatus(BaseModel):
+    status: str
+    valkey: bool
+    details: dict = {}
+
+@router.get("/health", response_model=HealthStatus, tags=["health"])
+async def health_check():
     """
-    Redis health check endpoint
+    Health check endpoint for the application.
+    Checks if Valkey is available.
     """
+    valkey_client = get_valkey()
+    valkey_healthy = False
+    details = {}
+    
     try:
-        # Test Redis connection
-        is_connected = await redis_client.is_healthy()
-        
-        # Basic Redis info
-        info = {
-            "status": "healthy" if is_connected else "unhealthy",
-            "connected": is_connected,
-        }
-        
-        # Add additional diagnostics if connected
-        if is_connected:
-            # Get Redis client stats
-            stats = {}  # You can add more detailed stats here
-            info["stats"] = stats
-            
-        return info
+        valkey_healthy = await valkey_client.is_healthy()
+        details["valkey"] = "connected" if valkey_healthy else "disconnected"
     except Exception as e:
-        return {
-            "status": "error",
-            "connected": False,
-            "error": str(e)
-        }
+        details["valkey_error"] = str(e)
+    
+    status = "healthy" if valkey_healthy else "unhealthy"
+    
+    response = HealthStatus(
+        status=status,
+        valkey=valkey_healthy,
+        details=details
+    )
+    
+    if not valkey_healthy:
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=response.dict()
+        )
+    
+    return response

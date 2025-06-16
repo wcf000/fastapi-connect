@@ -9,7 +9,9 @@ from app import crud
 from app.api.deps import CurrentUser, SessionDep, get_current_active_superuser
 from app.core import security
 from app.core.config import settings
-from app.core.redis.rate_limit import check_rate_limit
+# Replace Redis import with Valkey
+from app.core.valkey_init import get_valkey
+from app.core.valkey_core.limiting.rate_limit import check_rate_limit
 from app.core.security import get_password_hash
 from app.models import Message, NewPassword, Token, UserPublic
 from app.utils import (
@@ -31,12 +33,15 @@ async def login_access_token(
     """
     OAuth2 compatible token login with rate limiting protection
     """
+    # Get Valkey client
+    valkey_client = get_valkey()
+    
     # Rate limit by IP address (5 attempts per minute)
     client_ip = request.client.host
     rate_limit_key = f"login:{client_ip}"
 
-    # Check if rate limited
-    is_allowed = await check_rate_limit(rate_limit_key, 5, 60)
+    # Check if rate limited using Valkey client
+    is_allowed = await check_rate_limit(valkey_client, rate_limit_key, 5, 60)
     if not is_allowed:
         raise HTTPException(
             status_code=429,
@@ -76,11 +81,15 @@ async def recover_password(
     """
     Password Recovery with rate limiting
     """
+    # Get Valkey client
+    valkey_client = get_valkey()
+    
     # Rate limit by IP (3 attempts per hour)
     client_ip = request.client.host
     rate_limit_key = f"pwd_recovery:{client_ip}"
 
-    is_allowed = await check_rate_limit(rate_limit_key, 3, 3600)
+    # Use Valkey rate limiting
+    is_allowed = await check_rate_limit(valkey_client, rate_limit_key, 3, 3600)
     if not is_allowed:
         raise HTTPException(
             status_code=429,
