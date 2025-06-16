@@ -1,0 +1,7 @@
+[submodule "backend/app/core/redis"]
+	path = backend/app/core/redis
+	url = https://github.com/wcf000/redis-utilities.git
+	branch = bare_redis
+[submodule "backend/app/core/valkey_core"]
+	path = backend/app/core/valkey_core
+	url = https://github.com/wcf000/valkey-redis-flow.git

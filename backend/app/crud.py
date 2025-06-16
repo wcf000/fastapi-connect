@@ -1,10 +1,35 @@
 import uuid
-from typing import Any
+from typing import Any, Optional
 
-from sqlmodel import Session, select
+from sqlalchemy.orm import Session, joinedload
 
 from app.core.security import get_password_hash, verify_password
 from app.models import Item, ItemCreate, User, UserCreate, UserUpdate
+# Replace Redis import with Valkey
+from app.api.dependencies.cache import ValkeyCache, valkey_cache, invalidate_cache
+
+
+# Example of using Valkey caching in CRUD operations
+@valkey_cache(ttl=300, key_prefix="user:")
+async def get_user_by_id(db: Session, user_id: int):
+    """Get user by ID with Valkey caching."""
+    user = db.query(User).filter(User.id == user_id).first()
+    return user
+
+
+@invalidate_cache("user:*")
+async def update_user(db: Session, user_id: int, user_data: dict):
+    """Update user and invalidate cache."""
+    user = db.query(User).filter(User.id == user_id).first()
+    if not user:
+        return None
+    
+    for key, value in user_data.items():
+        setattr(user, key, value)
+    
+    db.commit()
+    db.refresh(user)
+    return user
 
 
 def create_user(*, session: Session, user_create: UserCreate) -> User:
@@ -29,12 +54,6 @@ def update_user(*, session: Session, db_user: User, user_in: UserUpdate) -> Any:
     session.commit()
     session.refresh(db_user)
     return db_user
-
-
-def get_user_by_email(*, session: Session, email: str) -> User | None:
-    statement = select(User).where(User.email == email)
-    session_user = session.exec(statement).first()
-    return session_user
 
 
 def authenticate(*, session: Session, email: str, password: str) -> User | None:

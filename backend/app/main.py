@@ -1,19 +1,16 @@
 import os
-import sentry_sdk
 from fastapi import FastAPI
 from fastapi.routing import APIRoute
 from starlette.middleware.cors import CORSMiddleware
 
 from app.api.main import api_router
 from app.core.config import settings
+from app.core.valkey_init import init_valkey, close_valkey
 
 
 def custom_generate_unique_id(route: APIRoute) -> str:
     return f"{route.tags[0]}-{route.name}"
 
-
-if settings.SENTRY_DSN and settings.ENVIRONMENT != "local":
-    sentry_sdk.init(dsn=str(settings.SENTRY_DSN), enable_tracing=True)
 
 app = FastAPI(
     title=settings.PROJECT_NAME,
@@ -32,6 +29,15 @@ if settings.all_cors_origins:
     )
 
 app.include_router(api_router, prefix=settings.API_V1_STR)
+
+# Valkey startup and shutdown events
+@app.on_event("startup")
+async def startup_db_client():
+    await init_valkey()
+
+@app.on_event("shutdown")
+async def shutdown_db_client():
+    await close_valkey()
 
 # Get host and port from environment variables
 HOST = os.getenv("HOST", "0.0.0.0")
