@@ -5,3 +5,9 @@
 [submodule "backend/app/core/valkey_core"]
 	path = backend/app/core/valkey_core
 	url = https://github.com/wcf000/valkey-redis-flow.git
+[submodule "backend/app/core/prometheus"]
+	path = backend/app/core/prometheus
+	url = https://github.com/wcf000/prometheus-client-utils.git
+[submodule "backend/app/core/grafana"]
+	path = backend/app/core/grafana
+	url = https://github.com/wcf000/grafana-client-utils.git

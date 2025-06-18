@@ -6,6 +6,8 @@ from pydantic import (
     AnyUrl,
     BeforeValidator,
     EmailStr,
+    Field,
+    ConfigDict,
     HttpUrl,
     PostgresDsn,
     computed_field,
@@ -22,6 +24,33 @@ def parse_cors(v: Any) -> list[str] | str:
     elif isinstance(v, list | str):
         return v
     raise ValueError(v)
+
+
+class MonitoringSettings(BaseSettings):
+    """
+    Configuration settings for monitoring services like Grafana and Prometheus.
+    """
+
+    # Grafana Settings
+    GRAFANA_PORT: int = Field(default=3000, validation_alias="GRAFANA_PORT")
+    GRAFANA_URL: str = Field(
+        default="http://localhost:3000", validation_alias="GRAFANA_URL"
+    )
+    GRAFANA_API_KEY: str = Field(
+        default="your_default_api_key", validation_alias="GRAFANA_API_KEY"
+    )
+
+    # Prometheus Settings
+    PROMETHEUS_PORT: int = Field(default=9090, validation_alias="PROMETHEUS_PORT")
+    PROMETHEUS_URL: str = Field(
+        default="http://localhost:9090", validation_alias="PROMETHEUS_URL"
+    )
+
+    model_config = ConfigDict(
+        env_prefix="",  # No prefix, uses validation_alias directly
+        case_sensitive=False,
+        extra="ignore",
+    )
 
 
 class Settings(BaseSettings):
@@ -94,6 +123,9 @@ class Settings(BaseSettings):
     EMAIL_TEST_USER: EmailStr = "test@example.com"
     FIRST_SUPERUSER: EmailStr
     FIRST_SUPERUSER_PASSWORD: str
+
+    # Add these URLs for health checks
+    monitoring: MonitoringSettings = MonitoringSettings()
 
     def _check_default_secret(self, var_name: str, value: str | None) -> None:
         if value == "changethis":

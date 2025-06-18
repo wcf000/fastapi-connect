@@ -42,6 +42,83 @@ services:
       - traefik.http.routers.${STACK_NAME?Variable not set}-adminer-https.tls.certresolver=le
       - traefik.http.services.${STACK_NAME?Variable not set}-adminer.loadbalancer.server.port=8080
 
+  valkey:
+    image: valkey/valkey:latest
+    restart: always
+    networks:
+      - default
+    volumes:
+      - valkey-data:/data
+    command: >
+      valkey-server --appendonly yes
+      --requirepass ${VALKEY_PASSWORD:-valkey_password}
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    env_file:
+      - .env
+    healthcheck:
+      test: ["CMD", "valkey-cli", "-a", "${VALKEY_PASSWORD:-valkey_password}", "ping"]
+      interval: 20s
+      timeout: 5s
+      retries: 5
+
+  prometheus:
+    image: prom/prometheus:v2.48.1
+    restart: always
+    networks:
+      - traefik-public
+      - default
+    volumes:
+      - ./backend/app/core/prometheus/docker/prometheus.local.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--web.enable-lifecycle'
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=traefik-public
+      - traefik.constraint-label=traefik-public
+      - traefik.http.routers.${STACK_NAME?Variable not set}-prometheus-http.rule=Host(`prometheus.${DOMAIN?Variable not set}`)
+      - traefik.http.routers.${STACK_NAME?Variable not set}-prometheus-http.entrypoints=http
+      - traefik.http.routers.${STACK_NAME?Variable not set}-prometheus-http.middlewares=https-redirect
+      - traefik.http.routers.${STACK_NAME?Variable not set}-prometheus-https.rule=Host(`prometheus.${DOMAIN?Variable not set}`)
+      - traefik.http.routers.${STACK_NAME?Variable not set}-prometheus-https.entrypoints=https
+      - traefik.http.routers.${STACK_NAME?Variable not set}-prometheus-https.tls=true
+      - traefik.http.routers.${STACK_NAME?Variable not set}-prometheus-https.tls.certresolver=le
+      - traefik.http.services.${STACK_NAME?Variable not set}-prometheus.loadbalancer.server.port=9090
+
+  grafana:
+    image: grafana/grafana:10.2.3
+    restart: always
+    networks:
+      - traefik-public
+      - default
+    volumes:
+      - grafana-data:/var/lib/grafana
+      - ./backend/app/core/grafana/provisioning/:/etc/grafana/provisioning/:ro
+    env_file:
+      - .env
+    environment:
+      - GF_SECURITY_ADMIN_USER=${GRAFANA_USERNAME:-admin}
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=https://grafana.${DOMAIN?Variable not set}
+    depends_on:
+      - prometheus
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=traefik-public
+      - traefik.constraint-label=traefik-public
+      - traefik.http.routers.${STACK_NAME?Variable not set}-grafana-http.rule=Host(`grafana.${DOMAIN?Variable not set}`)
+      - traefik.http.routers.${STACK_NAME?Variable not set}-grafana-http.entrypoints=http
+      - traefik.http.routers.${STACK_NAME?Variable not set}-grafana-http.middlewares=https-redirect
+      - traefik.http.routers.${STACK_NAME?Variable not set}-grafana-https.rule=Host(`grafana.${DOMAIN?Variable not set}`)
+      - traefik.http.routers.${STACK_NAME?Variable not set}-grafana-https.entrypoints=https
+      - traefik.http.routers.${STACK_NAME?Variable not set}-grafana-https.tls=true
+      - traefik.http.routers.${STACK_NAME?Variable not set}-grafana-https.tls.certresolver=le
+      - traefik.http.services.${STACK_NAME?Variable not set}-grafana.loadbalancer.server.port=3000
+
   prestart:
     image: '${DOCKER_IMAGE_BACKEND?Variable not set}:${TAG-latest}'
     build:
@@ -51,6 +128,9 @@ services:
       - default
     depends_on:
       db:
+        condition: service_healthy
+        restart: true
+      valkey:
         condition: service_healthy
         restart: true
     command: bash scripts/prestart.sh
@@ -87,6 +167,9 @@ services:
         restart: true
       prestart:
         condition: service_completed_successfully
+      valkey:
+        condition: service_healthy
+        restart: true
     env_file:
       - .env
     environment:
@@ -164,6 +247,9 @@ services:
       - traefik.http.routers.${STACK_NAME?Variable not set}-frontend-http.middlewares=https-redirect
 volumes:
   app-db-data:
+  valkey-data:
+  prometheus-data:
+  grafana-data:
 
 networks:
   traefik-public:

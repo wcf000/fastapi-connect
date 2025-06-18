@@ -10,10 +10,30 @@ import asyncio
 from typing import Any, Callable, Optional, TypeVar
 
 from app.core.valkey_init import get_valkey
+from prometheus_client import Counter, Summary
 
 logger = logging.getLogger(__name__)
 
 T = TypeVar('T')
+
+# Define metrics
+CACHE_HITS = Counter(
+    "valkey_cache_hits_total",
+    "Total number of cache hits"
+)
+CACHE_MISSES = Counter(
+    "valkey_cache_misses_total", 
+    "Total number of cache misses"
+)
+CACHE_ERRORS = Counter(
+    "valkey_cache_errors_total",
+    "Total number of cache operation errors"
+)
+CACHE_OPERATIONS = Summary(
+    "valkey_cache_operation_seconds",
+    "Cache operation latency in seconds",
+    ["operation"]
+)
 
 class ValkeyCache:
     """Wrapper for Valkey cache operations."""
@@ -24,16 +44,21 @@ class ValkeyCache:
         client = get_valkey()
         if not client:
             logger.warning(f"Valkey client not initialized. Cannot get key: {key}")
+            CACHE_ERRORS.inc()
             return default
             
-        try:
-            value = await client.get(key)
-            if value is None:
+        with CACHE_OPERATIONS.labels(operation="get").time():
+            try:
+                value = await client.get(key)
+                if value is None:
+                    CACHE_MISSES.inc()
+                    return default
+                CACHE_HITS.inc()
+                return value
+            except Exception as e:
+                logger.error(f"Error getting value from Valkey: {e}")
+                CACHE_ERRORS.inc()
                 return default
-            return value
-        except Exception as e:
-            logger.error(f"Error getting value from Valkey: {e}")
-            return default
     
     @staticmethod
     async def set(key: str, value: Any, ttl: int = 3600) -> bool:
@@ -41,13 +66,16 @@ class ValkeyCache:
         client = get_valkey()
         if not client:
             logger.warning(f"Valkey client not initialized. Cannot set key: {key}")
+            CACHE_ERRORS.inc()
             return False
             
-        try:
-            return await client.set(key, value, ex=ttl)
-        except Exception as e:
-            logger.error(f"Error setting value in Valkey: {e}")
-            return False
+        with CACHE_OPERATIONS.labels(operation="set").time():
+            try:
+                return await client.set(key, value, ex=ttl)
+            except Exception as e:
+                logger.error(f"Error setting value in Valkey: {e}")
+                CACHE_ERRORS.inc()
+                return False
     
     @staticmethod
     async def delete(key: str) -> bool:
@@ -55,14 +83,17 @@ class ValkeyCache:
         client = get_valkey()
         if not client:
             logger.warning(f"Valkey client not initialized. Cannot delete key: {key}")
+            CACHE_ERRORS.inc()
             return False
             
-        try:
-            result = await client.delete(key)
-            return result > 0
-        except Exception as e:
-            logger.error(f"Error deleting key from Valkey: {e}")
-            return False
+        with CACHE_OPERATIONS.labels(operation="delete").time():
+            try:
+                result = await client.delete(key)
+                return result > 0
+            except Exception as e:
+                logger.error(f"Error deleting key from Valkey: {e}")
+                CACHE_ERRORS.inc()
+                return False
         
     @staticmethod
     async def exists(key: str) -> bool:
@@ -70,13 +101,16 @@ class ValkeyCache:
         client = get_valkey()
         if not client:
             logger.warning(f"Valkey client not initialized. Cannot check key: {key}")
+            CACHE_ERRORS.inc()
             return False
             
-        try:
-            return await client.exists(key)
-        except Exception as e:
-            logger.error(f"Error checking key existence in Valkey: {e}")
-            return False
+        with CACHE_OPERATIONS.labels(operation="exists").time():
+            try:
+                return await client.exists(key)
+            except Exception as e:
+                logger.error(f"Error checking key existence in Valkey: {e}")
+                CACHE_ERRORS.inc()
+                return False
 
 
 def valkey_cache(ttl: int = 3600, key_prefix: str = "cache:"):
@@ -123,6 +157,7 @@ def valkey_cache(ttl: int = 3600, key_prefix: str = "cache:"):
                     await ValkeyCache.set(cache_key, result, ttl)
             except Exception as e:
                 logger.error(f"Error caching result: {e}")
+                CACHE_ERRORS.inc()
                 
             return result
         
@@ -136,15 +171,18 @@ async def invalidate_cache_keys(*keys: str):
     client = get_valkey()
     if not client:
         logger.warning("Valkey client not initialized. Cannot invalidate cache keys.")
+        CACHE_ERRORS.inc()
         return False
         
-    try:
-        result = await client.delete(*keys)
-        logger.debug(f"Invalidated {result} cache keys")
-        return result > 0
-    except Exception as e:
-        logger.error(f"Error invalidating cache keys: {e}")
-        return False
+    with CACHE_OPERATIONS.labels(operation="invalidate_many").time():
+        try:
+            result = await client.delete(*keys)
+            logger.debug(f"Invalidated {result} cache keys")
+            return result > 0
+        except Exception as e:
+            logger.error(f"Error invalidating cache keys: {e}")
+            CACHE_ERRORS.inc()
+            return False
 
 
 def invalidate_cache(*keys: str):
