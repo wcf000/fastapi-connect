@@ -3,10 +3,13 @@ from typing import Any, Optional
 
 from sqlalchemy.orm import Session, joinedload
 from sqlmodel import select
+from opentelemetry import trace
+from sqlalchemy import func
 
 from app.core.security import get_password_hash, verify_password
 from app.models import Item, ItemCreate, User, UserCreate, UserUpdate
 from app.api.dependencies.cache import ValkeyCache, valkey_cache, invalidate_cache
+from app.core.telemetry.decorators import trace_function, measure_performance
 
 # Import metrics - but use sparingly to avoid duplication
 from app.api.dependencies.metrics import (
@@ -16,50 +19,67 @@ from app.api.dependencies.metrics import (
 
 
 # These cached functions are NEW additions, so they should have metrics
+@trace_function("get_user_by_id")
 @valkey_cache(ttl=300, key_prefix="user:")
 async def get_user_by_id(db: Session, user_id: int):
     """Get user by ID with Valkey caching."""
     try:
-        with time_db_query(operation="read", table="users"):
-            user = db.query(User).filter(User.id == user_id).first()
-        
+        user = db.query(User).filter(User.id == user_id).first()
+
+        # Add business context to the current span
+        span = trace.get_current_span()
+        span.set_attribute("user.id", user_id)
+        span.set_attribute("cache.enabled", True)
         if user:
-            record_user_operation(operation="get_user_by_id_cached", status="success")
+            span.set_attribute("user.found", True)
         else:
-            record_user_operation(operation="get_user_by_id_cached", status="not_found")
+            span.set_attribute("user.found", False)
         
         return user
     except Exception as e:
-        record_user_operation(operation="get_user_by_id_cached", status="failure")
+        # Errors automatically captured by @trace_function
         raise
 
 
+@trace_function("update_user_cached")
 @invalidate_cache("user:*")
 async def update_user_cached(db: Session, user_id: int, user_data: dict):
     """Update user and invalidate cache."""
+    span = trace.get_current_span()
+    span.set_attribute("user.id", user_id)
+    
     try:
-        with time_db_query(operation="read", table="users"):
+        with trace.get_tracer(__name__).start_as_current_span("db_query") as query_span:
+            query_span.set_attribute("db.operation", "read")
+            query_span.set_attribute("db.table", "users")
+            
             user = db.query(User).filter(User.id == user_id).first()
         
         if not user:
-            record_user_operation(operation="update_user_cached", status="not_found")
+            span.set_attribute("operation.status", "not_found")
             return None
         
-        with time_db_query(operation="update", table="users"):
+        with trace.get_tracer(__name__).start_as_current_span("db_query") as query_span:
+            query_span.set_attribute("db.operation", "update")
+            query_span.set_attribute("db.table", "users")
+            
             for key, value in user_data.items():
                 setattr(user, key, value)
             
             db.commit()
             db.refresh(user)
         
-        record_user_operation(operation="update_user_cached", status="success")
+        span.set_attribute("operation.status", "success")
+        span.set_attribute("cache.invalidated", True)
         return user
     except Exception as e:
-        record_user_operation(operation="update_user_cached", status="failure")
+        span.set_attribute("operation.status", "failure")
+        span.record_exception(e)
         raise
 
 
 # These functions are called by routes that already have metrics, so NO metrics here
+@measure_performance("create_user_db")  # Monitor slow DB operations
 def create_user(*, session: Session, user_create: UserCreate) -> User:
     db_obj = User.model_validate(
         user_create, update={"hashed_password": get_password_hash(user_create.password)}
@@ -89,17 +109,34 @@ def get_user(*, session: Session, user_id: uuid.UUID) -> User | None:
     return session.get(User, user_id)
 
 
+@trace_function("get_user_by_email")
 def get_user_by_email(*, session: Session, email: str) -> User | None:
+    span = trace.get_current_span()
+    span.set_attribute("user.email", email)
+    
     statement = select(User).where(User.email == email)
-    return session.exec(statement).first()
+    user = session.exec(statement).first()
+    
+    span.set_attribute("user.found", user is not None)
+    return user
 
 
+@trace_function("authenticate_user")
 def authenticate(*, session: Session, email: str, password: str) -> User | None:
+    span = trace.get_current_span()
+    span.set_attribute("user.email", email)
+    
     db_user = get_user_by_email(session=session, email=email)
     if not db_user:
+        span.set_attribute("authentication.status", "user_not_found")
         return None
+        
     if not verify_password(password, db_user.hashed_password):
+        span.set_attribute("authentication.status", "invalid_password")
         return None
+        
+    span.set_attribute("authentication.status", "success")
+    span.set_attribute("user.id", str(db_user.id))
     return db_user
 
 

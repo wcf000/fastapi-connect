@@ -11,3 +11,6 @@
 [submodule "backend/app/core/grafana"]
 	path = backend/app/core/grafana
 	url = https://github.com/wcf000/grafana-client-utils.git
+[submodule "backend/app/core/telemetry"]
+	path = backend/app/core/telemetry
+	url = https://github.com/wcf000/telemetry-utils.git

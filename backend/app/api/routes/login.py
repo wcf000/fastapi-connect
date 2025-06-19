@@ -4,12 +4,12 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.security import OAuth2PasswordRequestForm
+from opentelemetry import trace
 
 from app import crud
 from app.api.deps import CurrentUser, SessionDep, get_current_active_superuser
 from app.core import security
 from app.core.config import settings
-# Replace Redis import with Valkey
 from app.core.valkey_init import get_valkey
 from app.core.valkey_core.limiting.rate_limit import check_rate_limit
 from app.core.security import get_password_hash
@@ -20,28 +20,26 @@ from app.utils import (
     send_email,
     verify_password_reset_token,
 )
-
-# Import metrics dependencies
-from app.api.dependencies.metrics import (
-    record_user_login,
-    record_user_operation,
-    time_db_query,
-    record_cache_operation,
-    time_cache_operation
-)
+from app.core.telemetry.decorators import trace_function, measure_performance, track_errors
 
 router = APIRouter(tags=["login"])
 
 
 @router.post("/login/access-token")
+@trace_function("login_access_token")
+@measure_performance("login_performance")
 async def login_access_token(
-    request: Request,  # Add request parameter to get client IP
+    request: Request,
     session: SessionDep,
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
 ) -> Token:
     """
     OAuth2 compatible token login with rate limiting protection
     """
+    span = trace.get_current_span()
+    span.set_attribute("client.ip", request.client.host)
+    span.set_attribute("user.email", form_data.username)
+    
     try:
         # Get Valkey client
         valkey_client = get_valkey()
@@ -51,35 +49,40 @@ async def login_access_token(
         rate_limit_key = f"login:{client_ip}"
 
         # Check if rate limited using Valkey client
-        with time_cache_operation("rate_limit_check"):
+        with trace.get_tracer(__name__).start_as_current_span("rate_limit_check") as rate_span:
             is_allowed = await check_rate_limit(valkey_client, rate_limit_key, 5, 60)
+            rate_span.set_attribute("rate_limit.allowed", is_allowed)
+            rate_span.set_attribute("rate_limit.key", rate_limit_key)
             
         if not is_allowed:
-            record_user_login(status="rate_limited")
-            record_cache_operation("rate_limit_check", "rejected")
+            span.set_attribute("login.status", "rate_limited")
             raise HTTPException(
                 status_code=429, detail="Too many login attempts. Please try again later."
             )
 
-        record_cache_operation("rate_limit_check", "allowed")
-
-        # Existing authentication logic with metrics
-        with time_db_query(operation="authenticate", table="users"):
+        # Existing authentication logic with spans
+        with trace.get_tracer(__name__).start_as_current_span("authenticate") as auth_span:
+            auth_span.set_attribute("db.operation", "authenticate")
+            auth_span.set_attribute("db.table", "users")
+            
             user = crud.authenticate(
                 session=session, email=form_data.username, password=form_data.password
             )
             
         if not user:
-            record_user_login(status="failure")
+            span.set_attribute("login.status", "failure")
+            span.set_attribute("failure.reason", "invalid_credentials")
             raise HTTPException(status_code=400, detail="Incorrect email or password")
         elif not user.is_active:
-            record_user_login(status="inactive_user")
+            span.set_attribute("login.status", "failure")
+            span.set_attribute("failure.reason", "inactive_user")
             raise HTTPException(status_code=400, detail="Inactive user")
             
         access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
         
-        # Record successful login
-        record_user_login(status="success")
+        # Record successful login in span
+        span.set_attribute("login.status", "success")
+        span.set_attribute("user.id", str(user.id))
         
         return Token(
             access_token=security.create_access_token(
@@ -87,25 +90,30 @@ async def login_access_token(
             )
         )
     except HTTPException:
-        # Re-raise HTTP exceptions
         raise
     except Exception as e:
-        record_user_login(status="error")
+        span.set_attribute("login.status", "error")
+        span.record_exception(e)
         raise HTTPException(
             status_code=500, detail=f"Login failed: {str(e)}"
         )
 
 
 @router.post("/login/test-token", response_model=UserPublic)
+@trace_function("test_token")
 def test_token(current_user: CurrentUser) -> Any:
     """
     Test access token
     """
-    record_user_operation(operation="test_token", status="success")
+    span = trace.get_current_span()
+    span.set_attribute("user.id", str(current_user.id))
+    span.set_attribute("operation.status", "success")
     return current_user
 
 
 @router.post("/password-recovery/{email}")
+@trace_function("recover_password")
+@track_errors
 async def recover_password(
     request: Request,
     email: str,
@@ -114,6 +122,10 @@ async def recover_password(
     """
     Password Recovery with rate limiting
     """
+    span = trace.get_current_span()
+    span.set_attribute("user.email", email)
+    span.set_attribute("client.ip", request.client.host)
+    
     try:
         # Get Valkey client
         valkey_client = get_valkey()
@@ -122,47 +134,53 @@ async def recover_password(
         client_ip = request.client.host
         rate_limit_key = f"pwd_recovery:{client_ip}"
 
-        # Use Valkey rate limiting
-        with time_cache_operation("rate_limit_check"):
+        # Use Valkey rate limiting with OpenTelemetry
+        with trace.get_tracer(__name__).start_as_current_span("rate_limit_check") as rate_span:
             is_allowed = await check_rate_limit(valkey_client, rate_limit_key, 3, 3600)
+            rate_span.set_attribute("rate_limit.allowed", is_allowed)
+            rate_span.set_attribute("rate_limit.key", rate_limit_key)
             
         if not is_allowed:
-            record_user_operation(operation="password_recovery", status="rate_limited")
-            record_cache_operation("rate_limit_check", "rejected")
+            span.set_attribute("operation.status", "rate_limited")
             raise HTTPException(
                 status_code=429, 
                 detail="Too many password recovery attempts. Please try again later."
             )
 
-        record_cache_operation("rate_limit_check", "allowed")
-
-        with time_db_query(operation="read", table="users"):
+        with trace.get_tracer(__name__).start_as_current_span("db_query") as query_span:
+            query_span.set_attribute("db.operation", "read")
+            query_span.set_attribute("db.table", "users")
+            
             user = crud.get_user_by_email(session=session, email=email)
+            query_span.set_attribute("user.found", user is not None)
 
         if not user:
-            record_user_operation(operation="password_recovery", status="user_not_found")
+            span.set_attribute("operation.status", "failure")
+            span.set_attribute("failure.reason", "user_not_found")
             raise HTTPException(
                 status_code=404,
                 detail="The user with this email does not exist in the system.",
             )
             
-        password_reset_token = generate_password_reset_token(email=email)
-        email_data = generate_reset_password_email(
-            email_to=user.email, email=email, token=password_reset_token
-        )
-        send_email(
-            email_to=user.email,
-            subject=email_data.subject,
-            html_content=email_data.html_content,
-        )
+        with trace.get_tracer(__name__).start_as_current_span("send_email") as email_span:
+            password_reset_token = generate_password_reset_token(email=email)
+            email_data = generate_reset_password_email(
+                email_to=user.email, email=email, token=password_reset_token
+            )
+            send_email(
+                email_to=user.email,
+                subject=email_data.subject,
+                html_content=email_data.html_content,
+            )
         
-        record_user_operation(operation="password_recovery", status="success")
+        span.set_attribute("operation.status", "success")
         return Message(message="Password recovery email sent")
     except HTTPException:
-        # Re-raise HTTP exceptions
+        # Error attributes already set above
         raise
     except Exception as e:
-        record_user_operation(operation="password_recovery", status="error")
+        span.set_attribute("operation.status", "failure")
+        span.record_exception(e)
         raise HTTPException(
             status_code=500, detail=f"Password recovery failed: {str(e)}"
         )

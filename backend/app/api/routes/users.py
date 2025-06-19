@@ -3,6 +3,7 @@ from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import col, delete, func, select
+from opentelemetry import trace
 
 from app import crud
 from app.api.deps import (
@@ -25,15 +26,7 @@ from app.models import (
     UserUpdateMe,
 )
 from app.utils import generate_new_account_email, send_email
-
-# Import metrics dependencies
-from app.api.dependencies.metrics import (
-    record_user_operation,
-    record_user_registration,
-    record_user_login,
-    time_db_query,
-    ACTIVE_USERS
-)
+from app.core.telemetry.decorators import trace_function, measure_performance, track_errors
 
 router = APIRouter(prefix="/users", tags=["users"])
 
@@ -43,249 +36,336 @@ router = APIRouter(prefix="/users", tags=["users"])
     dependencies=[Depends(get_current_active_superuser)],
     response_model=UsersPublic,
 )
+@trace_function("read_users")
 def read_users(session: SessionDep, skip: int = 0, limit: int = 100) -> Any:
     """
     Retrieve users.
     """
+    span = trace.get_current_span()
+    span.set_attribute("users.skip", skip)
+    span.set_attribute("users.limit", limit)
+    
     try:
-        # Using context manager to time the database queries
-        with time_db_query(operation="read", table="users"):
+        # Using span to time the database query
+        with trace.get_tracer(__name__).start_as_current_span("db_query") as query_span:
+            query_span.set_attribute("db.operation", "read")
+            query_span.set_attribute("db.table", "users")
+            
             count_statement = select(func.count()).select_from(User)
             count = session.exec(count_statement).one()
 
             statement = select(User).offset(skip).limit(limit)
             users = session.exec(statement).all()
+            
+            query_span.set_attribute("db.rows_fetched", len(users))
 
-        # Record successful operation
-        record_user_operation(operation="read_list", status="success")
+        span.set_attribute("operation.status", "success")
+        span.set_attribute("users.count", count)
         return UsersPublic(data=users, count=count)
     except Exception as e:
-        # Record failed operation
-        record_user_operation(operation="read_list", status="failure")
+        span.set_attribute("operation.status", "failure")
+        span.record_exception(e)
         raise
 
 
 @router.post(
     "/", dependencies=[Depends(get_current_active_superuser)], response_model=UserPublic
 )
-def create_user(*, session: SessionDep, user_in: UserCreate) -> Any:
+@trace_function("create_user") 
+@track_errors
+async def create_user(user_in: UserCreate, session: SessionDep) -> Any:
     """
     Create new user.
     """
+    span = trace.get_current_span()
+    span.set_attribute("user.email", user_in.email)
+    
     try:
         # Check if user exists
-        with time_db_query(operation="read", table="users"):
+        with trace.get_tracer(__name__).start_as_current_span("db_query") as query_span:
+            query_span.set_attribute("db.operation", "read")
+            query_span.set_attribute("db.table", "users")
+            
             user = crud.get_user_by_email(session=session, email=user_in.email)
             
         if user:
-            record_user_operation(operation="create", status="failure")
-            record_user_registration(status="failure")
+            span.set_attribute("registration.status", "failure")
+            span.set_attribute("failure.reason", "email_exists")
             raise HTTPException(
                 status_code=400,
                 detail="The user with this email already exists in the system.",
             )
 
         # Create user
-        with time_db_query(operation="create", table="users"):
+        with trace.get_tracer(__name__).start_as_current_span("db_query") as query_span:
+            query_span.set_attribute("db.operation", "create")
+            query_span.set_attribute("db.table", "users")
+            
             user = crud.create_user(session=session, user_create=user_in)
+            query_span.set_attribute("user.id", str(user.id))
             
         # Send email if enabled
         if settings.emails_enabled and user_in.email:
-            email_data = generate_new_account_email(
-                email_to=user_in.email, username=user_in.email, password=user_in.password
-            )
-            send_email(
-                email_to=user_in.email,
-                subject=email_data.subject,
-                html_content=email_data.html_content,
-            )
+            with trace.get_tracer(__name__).start_as_current_span("send_email"):
+                email_data = generate_new_account_email(
+                    email_to=user_in.email, username=user_in.email, password=user_in.password
+                )
+                send_email(
+                    email_to=user_in.email,
+                    subject=email_data.subject,
+                    html_content=email_data.html_content,
+                )
             
-        record_user_operation(operation="create", status="success")
-        record_user_registration(status="success")
+        span.set_attribute("registration.status", "success")
+        span.set_attribute("user.id", str(user.id))
         return user
-    except HTTPException:
-        # Re-raise HTTP exceptions
+    except HTTPException as he:
+        span.set_attribute("error.type", "http_exception")
+        span.set_attribute("error.status_code", he.status_code)
         raise
     except Exception as e:
-        record_user_operation(operation="create", status="failure")
-        record_user_registration(status="failure")
+        span.set_attribute("registration.status", "failure")
+        span.set_attribute("error.type", str(type(e).__name__))
         raise
 
 
 @router.patch("/me", response_model=UserPublic)
+@trace_function("update_user_me")
 def update_user_me(
     *, session: SessionDep, user_in: UserUpdateMe, current_user: CurrentUser
 ) -> Any:
     """
     Update own user.
     """
+    span = trace.get_current_span()
+    span.set_attribute("user.id", str(current_user.id))
+    
     try:
         if user_in.email:
-            with time_db_query(operation="read", table="users"):
+            with trace.get_tracer(__name__).start_as_current_span("db_query") as query_span:
+                query_span.set_attribute("db.operation", "read")
+                query_span.set_attribute("db.table", "users")
+                
                 existing_user = crud.get_user_by_email(session=session, email=user_in.email)
                 
             if existing_user and existing_user.id != current_user.id:
-                record_user_operation(operation="update_self", status="failure")
+                span.set_attribute("operation.status", "failure")
+                span.set_attribute("failure.reason", "email_exists")
                 raise HTTPException(
                     status_code=409, detail="User with this email already exists"
                 )
                 
         # Update user
-        with time_db_query(operation="update", table="users"):
+        with trace.get_tracer(__name__).start_as_current_span("db_query") as query_span:
+            query_span.set_attribute("db.operation", "update")
+            query_span.set_attribute("db.table", "users")
+            
             user_data = user_in.model_dump(exclude_unset=True)
             current_user.sqlmodel_update(user_data)
             session.add(current_user)
             session.commit()
             session.refresh(current_user)
             
-        record_user_operation(operation="update_self", status="success")
+        span.set_attribute("operation.status", "success")
         return current_user
-    except HTTPException:
-        # Re-raise HTTP exceptions
+    except HTTPException as he:
+        span.set_attribute("error.type", "http_exception")
+        span.set_attribute("error.status_code", he.status_code)
         raise
     except Exception as e:
-        record_user_operation(operation="update_self", status="failure")
+        span.set_attribute("operation.status", "failure")
+        span.record_exception(e)
         raise
 
 
 @router.patch("/me/password", response_model=Message)
+@trace_function("update_password_me")
 def update_password_me(
     *, session: SessionDep, body: UpdatePassword, current_user: CurrentUser
 ) -> Any:
     """
     Update own password.
     """
+    span = trace.get_current_span()
+    span.set_attribute("user.id", str(current_user.id))
+    
     try:
         if not verify_password(body.current_password, current_user.hashed_password):
-            record_user_operation(operation="update_password", status="failure")
+            span.set_attribute("operation.status", "failure")
+            span.set_attribute("failure.reason", "incorrect_password")
             raise HTTPException(status_code=400, detail="Incorrect password")
             
         if body.current_password == body.new_password:
-            record_user_operation(operation="update_password", status="failure")
+            span.set_attribute("operation.status", "failure")
+            span.set_attribute("failure.reason", "same_password")
             raise HTTPException(
                 status_code=400, detail="New password cannot be the same as the current one"
             )
             
         # Update password
-        with time_db_query(operation="update", table="users"):
+        with trace.get_tracer(__name__).start_as_current_span("db_query") as query_span:
+            query_span.set_attribute("db.operation", "update")
+            query_span.set_attribute("db.table", "users")
+            
             hashed_password = get_password_hash(body.new_password)
             current_user.hashed_password = hashed_password
             session.add(current_user)
             session.commit()
             
-        record_user_operation(operation="update_password", status="success")
+        span.set_attribute("operation.status", "success")
         return Message(message="Password updated successfully")
     except HTTPException:
-        # Re-raise HTTP exceptions
+        # Error attributes already set above
         raise
     except Exception as e:
-        record_user_operation(operation="update_password", status="failure")
+        span.set_attribute("operation.status", "failure")
+        span.record_exception(e)
         raise
 
 
 @router.get("/me", response_model=UserPublic)
+@trace_function("read_user_me")
 def read_user_me(current_user: CurrentUser) -> Any:
     """
     Get current user.
     """
-    # Increment active users counter
-    ACTIVE_USERS.inc()
-    record_user_operation(operation="read_self", status="success")
+    span = trace.get_current_span()
+    span.set_attribute("user.id", str(current_user.id))
+    span.set_attribute("operation.status", "success")
     return current_user
 
 
 @router.delete("/me", response_model=Message)
+@trace_function("delete_user_me")
 def delete_user_me(session: SessionDep, current_user: CurrentUser) -> Any:
     """
     Delete own user.
     """
+    span = trace.get_current_span()
+    span.set_attribute("user.id", str(current_user.id))
+    
     try:
         if current_user.is_superuser:
-            record_user_operation(operation="delete_self", status="failure")
+            span.set_attribute("operation.status", "failure")
+            span.set_attribute("failure.reason", "superuser_self_delete")
             raise HTTPException(
                 status_code=403, detail="Super users are not allowed to delete themselves"
             )
             
         # Delete user
-        with time_db_query(operation="delete", table="users"):
+        with trace.get_tracer(__name__).start_as_current_span("db_query") as query_span:
+            query_span.set_attribute("db.operation", "delete")
+            query_span.set_attribute("db.table", "users")
+            
             session.delete(current_user)
             session.commit()
             
-        record_user_operation(operation="delete_self", status="success")
+        span.set_attribute("operation.status", "success")
         return Message(message="User deleted successfully")
     except HTTPException:
-        # Re-raise HTTP exceptions
+        # Error attributes already set above
         raise
     except Exception as e:
-        record_user_operation(operation="delete_self", status="failure")
+        span.set_attribute("operation.status", "failure")
+        span.record_exception(e)
         raise
 
 
 @router.post("/signup", response_model=UserPublic)
+@trace_function("register_user")
+@track_errors
 def register_user(session: SessionDep, user_in: UserRegister) -> Any:
     """
     Create new user without the need to be logged in.
     """
+    span = trace.get_current_span()
+    span.set_attribute("user.email", user_in.email)
+    
     try:
         # Check if user exists
-        with time_db_query(operation="read", table="users"):
+        with trace.get_tracer(__name__).start_as_current_span("db_query") as query_span:
+            query_span.set_attribute("db.operation", "read")
+            query_span.set_attribute("db.table", "users")
+            
             user = crud.get_user_by_email(session=session, email=user_in.email)
             
         if user:
-            record_user_operation(operation="signup", status="failure")
-            record_user_registration(status="failure")
+            span.set_attribute("registration.status", "failure")
+            span.set_attribute("failure.reason", "email_exists")
             raise HTTPException(
                 status_code=400,
                 detail="The user with this email already exists in the system",
             )
             
         # Create user
-        with time_db_query(operation="create", table="users"):
+        with trace.get_tracer(__name__).start_as_current_span("db_query") as query_span:
+            query_span.set_attribute("db.operation", "create")
+            query_span.set_attribute("db.table", "users")
+            
             user_create = UserCreate.model_validate(user_in)
             user = crud.create_user(session=session, user_create=user_create)
+            query_span.set_attribute("user.id", str(user.id))
             
-        record_user_operation(operation="signup", status="success")
-        record_user_registration(status="success")
+        span.set_attribute("registration.status", "success")
+        span.set_attribute("user.id", str(user.id))
         return user
     except HTTPException:
-        # Re-raise HTTP exceptions
+        # Error attributes already set above
         raise
     except Exception as e:
-        record_user_operation(operation="signup", status="failure")
-        record_user_registration(status="failure")
+        span.set_attribute("registration.status", "failure")
+        span.record_exception(e)
         raise
 
 
 @router.get("/{user_id}", response_model=UserPublic)
+@trace_function("read_user_by_id")
 def read_user_by_id(
     user_id: uuid.UUID, session: SessionDep, current_user: CurrentUser
 ) -> Any:
     """
     Get a specific user by id.
     """
+    span = trace.get_current_span()
+    span.set_attribute("user.id", str(user_id))
+    span.set_attribute("requester.id", str(current_user.id))
+    
     try:
         # Get user
-        with time_db_query(operation="read", table="users"):
+        with trace.get_tracer(__name__).start_as_current_span("db_query") as query_span:
+            query_span.set_attribute("db.operation", "read")
+            query_span.set_attribute("db.table", "users")
+            
             user = session.get(User, user_id)
+            query_span.set_attribute("user.found", user is not None)
+            
+        if not user:
+            span.set_attribute("operation.status", "failure")
+            span.set_attribute("failure.reason", "user_not_found")
+            raise HTTPException(status_code=404, detail="User not found")
             
         if user == current_user:
-            record_user_operation(operation="read_self", status="success")
+            span.set_attribute("operation.type", "read_self")
+            span.set_attribute("operation.status", "success")
             return user
             
         if not current_user.is_superuser:
-            record_user_operation(operation="read_other", status="failure")
+            span.set_attribute("operation.status", "failure")
+            span.set_attribute("failure.reason", "insufficient_privileges")
             raise HTTPException(
                 status_code=403,
                 detail="The user doesn't have enough privileges",
             )
             
-        record_user_operation(operation="read_other", status="success")
+        span.set_attribute("operation.type", "read_other")
+        span.set_attribute("operation.status", "success")
         return user
     except HTTPException:
-        # Re-raise HTTP exceptions
+        # Error attributes already set above
         raise
     except Exception as e:
-        record_user_operation(operation="read_other", status="failure")
+        span.set_attribute("operation.status", "failure")
+        span.record_exception(e)
         raise
 
 
@@ -294,6 +374,7 @@ def read_user_by_id(
     dependencies=[Depends(get_current_active_superuser)],
     response_model=UserPublic,
 )
+@trace_function("update_user_by_id")
 def update_user(
     *,
     session: SessionDep,
@@ -303,76 +384,119 @@ def update_user(
     """
     Update a user.
     """
+    span = trace.get_current_span()
+    span.set_attribute("user.id", str(user_id))
+    
     try:
         # Get user
-        with time_db_query(operation="read", table="users"):
+        with trace.get_tracer(__name__).start_as_current_span("db_query") as query_span:
+            query_span.set_attribute("db.operation", "read")
+            query_span.set_attribute("db.table", "users")
+            
             db_user = session.get(User, user_id)
+            query_span.set_attribute("user.found", db_user is not None)
             
         if not db_user:
-            record_user_operation(operation="update_other", status="failure")
+            span.set_attribute("operation.status", "failure")
+            span.set_attribute("failure.reason", "user_not_found")
             raise HTTPException(
                 status_code=404,
                 detail="The user with this id does not exist in the system",
             )
             
         if user_in.email:
-            with time_db_query(operation="read", table="users"):
+            with trace.get_tracer(__name__).start_as_current_span("db_query") as query_span:
+                query_span.set_attribute("db.operation", "read")
+                query_span.set_attribute("db.table", "users")
+                
                 existing_user = crud.get_user_by_email(session=session, email=user_in.email)
+                query_span.set_attribute("email.exists", existing_user is not None)
                 
             if existing_user and existing_user.id != user_id:
-                record_user_operation(operation="update_other", status="failure")
+                span.set_attribute("operation.status", "failure")
+                span.set_attribute("failure.reason", "email_exists")
                 raise HTTPException(
                     status_code=409, detail="User with this email already exists"
                 )
 
         # Update user
-        with time_db_query(operation="update", table="users"):
+        with trace.get_tracer(__name__).start_as_current_span("db_query") as query_span:
+            query_span.set_attribute("db.operation", "update")
+            query_span.set_attribute("db.table", "users")
+            
             db_user = crud.update_user(session=session, db_user=db_user, user_in=user_in)
             
-        record_user_operation(operation="update_other", status="success")
+        span.set_attribute("operation.status", "success")
+        span.set_attribute("operation.type", "update_other")
         return db_user
-    except HTTPException:
-        # Re-raise HTTP exceptions
+    except HTTPException as he:
+        span.set_attribute("error.type", "http_exception")
+        span.set_attribute("error.status_code", he.status_code)
         raise
     except Exception as e:
-        record_user_operation(operation="update_other", status="failure")
+        span.set_attribute("operation.status", "failure")
+        span.set_attribute("error.type", str(type(e).__name__))
+        span.record_exception(e)
         raise
 
 
 @router.delete("/{user_id}", dependencies=[Depends(get_current_active_superuser)])
+@trace_function("delete_user_by_id")
 def delete_user(
     session: SessionDep, current_user: CurrentUser, user_id: uuid.UUID
 ) -> Message:
     """
     Delete a user.
     """
+    span = trace.get_current_span()
+    span.set_attribute("user.id", str(user_id))
+    span.set_attribute("requester.id", str(current_user.id))
+    
     try:
         # Get user
-        with time_db_query(operation="read", table="users"):
+        with trace.get_tracer(__name__).start_as_current_span("db_query") as query_span:
+            query_span.set_attribute("db.operation", "read")
+            query_span.set_attribute("db.table", "users")
+            
             user = session.get(User, user_id)
+            query_span.set_attribute("user.found", user is not None)
             
         if not user:
-            record_user_operation(operation="delete_other", status="failure")
+            span.set_attribute("operation.status", "failure")
+            span.set_attribute("failure.reason", "user_not_found")
             raise HTTPException(status_code=404, detail="User not found")
             
         if user == current_user:
-            record_user_operation(operation="delete_other", status="failure")
+            span.set_attribute("operation.status", "failure")
+            span.set_attribute("failure.reason", "self_delete_forbidden")
             raise HTTPException(
                 status_code=403, detail="Super users are not allowed to delete themselves"
             )
             
         # Delete user and their items
-        with time_db_query(operation="delete", table="users"):
+        with trace.get_tracer(__name__).start_as_current_span("db_query") as query_span:
+            query_span.set_attribute("db.operation", "delete")
+            query_span.set_attribute("db.table", "items")
+            
             statement = delete(Item).where(col(Item.owner_id) == user_id)
-            session.exec(statement)  # type: ignore
+            result = session.exec(statement)  # type: ignore
+            query_span.set_attribute("items.deleted", result.rowcount if hasattr(result, "rowcount") else 0)
+            
+        with trace.get_tracer(__name__).start_as_current_span("db_query") as query_span:
+            query_span.set_attribute("db.operation", "delete")
+            query_span.set_attribute("db.table", "users")
+            
             session.delete(user)
             session.commit()
             
-        record_user_operation(operation="delete_other", status="success")
+        span.set_attribute("operation.status", "success")
+        span.set_attribute("operation.type", "delete_other")
         return Message(message="User deleted successfully")
     except HTTPException:
-        # Re-raise HTTP exceptions
+        # Error attributes already set above
         raise
     except Exception as e:
-        record_user_operation(operation="delete_other", status="failure")
+        span.set_attribute("operation.status", "failure")
+        span.set_attribute("error.type", str(type(e).__name__))
+        span.record_exception(e)
         raise
