@@ -1,0 +1,19 @@
+[submodule "backend/app/core/redis"]
+	path = backend/app/core/redis
+	url = https://github.com/wcf000/redis-utilities.git
+	branch = bare_redis
+[submodule "backend/app/core/valkey_core"]
+	path = backend/app/core/valkey_core
+	url = https://github.com/wcf000/valkey-redis-flow.git
+[submodule "backend/app/core/prometheus"]
+	path = backend/app/core/prometheus
+	url = https://github.com/wcf000/prometheus-client-utils.git
+[submodule "backend/app/core/grafana"]
+	path = backend/app/core/grafana
+	url = https://github.com/wcf000/grafana-client-utils.git
+[submodule "backend/app/core/telemetry"]
+	path = backend/app/core/telemetry
+	url = https://github.com/wcf000/telemetry-utils.git
+[submodule "backend/app/core/third_party_integrations/stripe_home"]
+	path = backend/app/core/third_party_integrations/stripe_home
+	url = https://github.com/wcf000/fast_stripe_python_template.git
