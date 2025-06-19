@@ -16,4 +16,4 @@
 	url = https://github.com/wcf000/telemetry-utils.git
 [submodule "backend/app/core/third_party_integrations/stripe_home"]
 	path = backend/app/core/third_party_integrations/stripe_home
-	url = https://github.com/TechWithTy/fast_stripe_python_template.git
+	url = https://github.com/wcf000/fast_stripe_python_template.git
