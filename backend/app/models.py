@@ -97,6 +97,18 @@ class Message(SQLModel):
     message: str
 
 
+# Enhanced message model for Pulsar messaging
+class PulsarMessage(SQLModel):
+    """Message model for Pulsar topics."""
+    id: str  # Message ID
+    content: str  # Message content
+    topic: str  # Pulsar topic
+    sender_id: str | None = None  # User ID of sender
+    recipient_id: str | None = None  # User ID of recipient
+    timestamp: str  # Message timestamp
+    metadata: dict | None = None  # Additional metadata
+
+
 # JSON payload containing access token
 class Token(SQLModel):
     access_token: str

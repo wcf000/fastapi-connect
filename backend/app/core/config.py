@@ -53,6 +53,35 @@ class MonitoringSettings(BaseSettings):
     )
 
 
+class PulsarSettings(BaseSettings):
+    """
+    Configuration settings for Apache Pulsar messaging service.
+    """
+
+    # Connection settings
+    PULSAR_ADVERTISED_ADDRESS: str = Field(
+        default="localhost", validation_alias="PULSAR_ADVERTISED_ADDRESS"
+    )
+    PULSAR_BROKER_PORT: int = Field(
+        default=6650, validation_alias="PULSAR_BROKER_PORT"
+    )
+
+    # TLS settings
+    PULSAR_TLS_CERT_PATH: str = Field(
+        default="", validation_alias="PULSAR_TLS_CERT_PATH"
+    )
+    PULSAR_TLS_KEY_PATH: str = Field(default="", validation_alias="PULSAR_TLS_KEY_PATH")
+    PULSAR_TLS_CA_PATH: str = Field(default="", validation_alias="PULSAR_TLS_CA_PATH")
+
+    # Authentication settings
+    PULSAR_AUTH_TOKEN: str = Field(default="", validation_alias="PULSAR_AUTH_TOKEN")
+    PULSAR_JWT_TOKEN: str = Field(default="", validation_alias="PULSAR_JWT_TOKEN")
+
+    class Config:
+        env_file = ".env"
+        case_sensitive = True
+
+
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         # Use top level .env file (one level above ./backend/)
@@ -126,6 +155,9 @@ class Settings(BaseSettings):
 
     # Add these URLs for health checks
     monitoring: MonitoringSettings = MonitoringSettings()
+    
+    # Pulsar messaging settings
+    pulsar: PulsarSettings = PulsarSettings()
 
     def _check_default_secret(self, var_name: str, value: str | None) -> None:
         if value == "changethis":

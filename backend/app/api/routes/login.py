@@ -1,7 +1,8 @@
 from datetime import timedelta
 from typing import Annotated, Any
+from datetime import datetime
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, BackgroundTasks
 from fastapi.responses import HTMLResponse
 from fastapi.security import OAuth2PasswordRequestForm
 from opentelemetry import trace
@@ -21,6 +22,14 @@ from app.utils import (
     verify_password_reset_token,
 )
 from app.core.telemetry.decorators import trace_function, measure_performance, track_errors
+from app.api.dependencies.metrics import time_db_query, record_user_operation
+
+# Import messaging functions
+from app.api.messaging.auth import (
+    send_login_event,
+    send_password_reset_event,
+    send_suspicious_activity_event
+)
 
 router = APIRouter(tags=["login"])
 
@@ -32,6 +41,7 @@ async def login_access_token(
     request: Request,
     session: SessionDep,
     form_data: Annotated[OAuth2PasswordRequestForm, Depends()],
+    background_tasks: BackgroundTasks
 ) -> Token:
     """
     OAuth2 compatible token login with rate limiting protection
@@ -72,6 +82,18 @@ async def login_access_token(
         if not user:
             span.set_attribute("login.status", "failure")
             span.set_attribute("failure.reason", "invalid_credentials")
+            
+            # Send failed login event to Pulsar in the background
+            login_event_data = {
+                "email": form_data.username,
+                "client_ip": request.client.host,
+                "user_agent": request.headers.get("user-agent", ""),
+                "success": False,
+                "failure_reason": "invalid_credentials",
+                "login_time": datetime.now().isoformat()
+            }
+            background_tasks.add_task(send_login_event, login_event_data)
+            
             raise HTTPException(status_code=400, detail="Incorrect email or password")
         elif not user.is_active:
             span.set_attribute("login.status", "failure")
@@ -83,6 +105,17 @@ async def login_access_token(
         # Record successful login in span
         span.set_attribute("login.status", "success")
         span.set_attribute("user.id", str(user.id))
+        
+        # Send login event to Pulsar in the background
+        login_event_data = {
+            "user_id": str(user.id),
+            "email": form_data.username,
+            "client_ip": request.client.host,
+            "user_agent": request.headers.get("user-agent", ""),
+            "success": True,
+            "login_time": datetime.now().isoformat()
+        }
+        background_tasks.add_task(send_login_event, login_event_data)
         
         return Token(
             access_token=security.create_access_token(
@@ -118,6 +151,7 @@ async def recover_password(
     request: Request,
     email: str,
     session: SessionDep,
+    background_tasks: BackgroundTasks
 ) -> Message:
     """
     Password Recovery with rate limiting
@@ -142,6 +176,17 @@ async def recover_password(
             
         if not is_allowed:
             span.set_attribute("operation.status", "rate_limited")
+            
+            # Send suspicious activity event for rate limit hit
+            suspicious_data = {
+                "email": email,
+                "client_ip": request.client.host,
+                "user_agent": request.headers.get("user-agent", ""),
+                "activity_type": "password_recovery_rate_limit",
+                "timestamp": datetime.now().isoformat()
+            }
+            background_tasks.add_task(send_suspicious_activity_event, suspicious_data)
+            
             raise HTTPException(
                 status_code=429, 
                 detail="Too many password recovery attempts. Please try again later."
@@ -163,15 +208,29 @@ async def recover_password(
             )
             
         with trace.get_tracer(__name__).start_as_current_span("send_email") as email_span:
+            email_span.set_attribute("email.to", email)
+            
             password_reset_token = generate_password_reset_token(email=email)
-            email_data = generate_reset_password_email(
+            recovery_email = generate_reset_password_email(
                 email_to=user.email, email=email, token=password_reset_token
             )
+            
+            # Send email
             send_email(
                 email_to=user.email,
-                subject=email_data.subject,
-                html_content=email_data.html_content,
+                subject=recovery_email.subject,
+                html_content=recovery_email.html_content,
             )
+            
+            # Send password reset event to Pulsar
+            reset_event_data = {
+                "user_id": str(user.id),
+                "email": email,
+                "client_ip": request.client.host,
+                "user_agent": request.headers.get("user-agent", ""),
+                "timestamp": datetime.now().isoformat()
+            }
+            background_tasks.add_task(send_password_reset_event, reset_event_data)
         
         span.set_attribute("operation.status", "success")
         return Message(message="Password recovery email sent")
@@ -187,7 +246,11 @@ async def recover_password(
 
 
 @router.post("/reset-password/")
-def reset_password(session: SessionDep, body: NewPassword) -> Message:
+def reset_password(
+    session: SessionDep, 
+    body: NewPassword,
+    background_tasks: BackgroundTasks
+) -> Message:
     """
     Reset password
     """
@@ -212,6 +275,15 @@ def reset_password(session: SessionDep, body: NewPassword) -> Message:
             user.hashed_password = hashed_password
             session.add(user)
             session.commit()
+            
+        # Send password reset completion event
+        reset_complete_event = {
+            "user_id": str(user.id),
+            "email": email,
+            "timestamp": datetime.now().isoformat(),
+            "event_type": "password_reset_complete"
+        }
+        background_tasks.add_task(send_password_reset_event, reset_complete_event)
             
         record_user_operation(operation="reset_password", status="success")
         return Message(message="Password updated successfully")

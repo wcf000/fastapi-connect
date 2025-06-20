@@ -30,6 +30,7 @@ dependencies = [
     "locust (>=2.37.10,<3.0.0)",
     "grafana-client (>=4.3.2,<5.0.0)",
     "prometheus-fastapi-instrumentator (>=7.1.0,<8.0.0)",
+    "pulsar (>=2.0.2,<3.0.0)",
 ]
 
 [tool.uv]

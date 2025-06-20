@@ -1,7 +1,7 @@
 import uuid
 from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from sqlmodel import func, select
 
 from app import crud
@@ -18,6 +18,21 @@ from app.api.dependencies.metrics import (
     record_cache_operation
 )
 from app.core.valkey_init import get_valkey
+
+# Import Pulsar dependencies
+from app.core.pulsar.client import PulsarClient
+from app.core.pulsar.decorators import pulsar_task
+
+# Define Pulsar topics
+ITEM_CREATED_TOPIC = "persistent://public/default/item-created"
+ITEM_UPDATED_TOPIC = "persistent://public/default/item-updated"
+ITEM_DELETED_TOPIC = "persistent://public/default/item-deleted"
+DLQ_TOPIC = "persistent://public/default/dead-letter-queue"
+
+# Get Pulsar client instance
+def get_pulsar_client():
+    """Dependency to get Pulsar client."""
+    return PulsarClient()
 
 router = APIRouter(prefix="/items", tags=["items"])
 
@@ -137,7 +152,11 @@ async def read_item(session: SessionDep, current_user: CurrentUser, id: uuid.UUI
 
 @router.post("/", response_model=ItemPublic)
 async def create_item(
-    *, session: SessionDep, current_user: CurrentUser, item_in: ItemCreate
+    *, 
+    session: SessionDep, 
+    current_user: CurrentUser, 
+    item_in: ItemCreate,
+    background_tasks: BackgroundTasks
 ) -> Any:
     """
     Create new item.
@@ -160,6 +179,28 @@ async def create_item(
                     await valkey.delete(cache_key)
             record_cache_operation("delete_pattern", "success")
 
+        # Send item created event to Pulsar
+        item_data = {
+            "id": str(item.id),
+            "title": item.title,
+            "description": item.description,
+            "owner_id": str(item.owner_id),
+            "event_type": "item_created",
+            "timestamp": str(uuid.uuid4())
+        }
+        
+        # Use background task for non-blocking operation
+        background_tasks.add_task(
+            publish_item_event,
+            ITEM_CREATED_TOPIC,
+            item_data
+        )
+
+        # Publish item created event to Pulsar
+        pulsar_client = get_pulsar_client()
+        with pulsar_client.producer() as producer:
+            producer.send(ITEM_CREATED_TOPIC, value=item.model_dump_json())
+
         record_user_operation(operation="create_item", status="success")
         return item
     except Exception as e:
@@ -171,7 +212,12 @@ async def create_item(
 
 @router.put("/{id}", response_model=ItemPublic)
 async def update_item(
-    *, session: SessionDep, current_user: CurrentUser, id: uuid.UUID, item_in: ItemUpdate
+    *, 
+    session: SessionDep, 
+    current_user: CurrentUser, 
+    id: uuid.UUID, 
+    item_in: ItemUpdate,
+    background_tasks: BackgroundTasks
 ) -> Any:
     """
     Update an item.
@@ -203,6 +249,29 @@ async def update_item(
         with time_cache_operation("delete"):
             await valkey.delete(cache_key)
             record_cache_operation("delete", "success")
+            
+        # Send item updated event to Pulsar
+        item_data = {
+            "id": str(item.id),
+            "title": item.title,
+            "description": item.description,
+            "owner_id": str(item.owner_id),
+            "event_type": "item_updated",
+            "timestamp": str(uuid.uuid4()),
+            "updated_fields": list(update_dict.keys())
+        }
+        
+        # Use background task for non-blocking operation
+        background_tasks.add_task(
+            publish_item_event,
+            ITEM_UPDATED_TOPIC,
+            item_data
+        )
+
+        # Publish item updated event to Pulsar
+        pulsar_client = get_pulsar_client()
+        with pulsar_client.producer() as producer:
+            producer.send(ITEM_UPDATED_TOPIC, value=item.model_dump_json())
 
         record_user_operation(operation="update_item", status="success")
         return item
@@ -217,7 +286,12 @@ async def update_item(
 
 
 @router.delete("/{id}")
-async def delete_item(session: SessionDep, current_user: CurrentUser, id: uuid.UUID) -> Message:
+async def delete_item(
+    session: SessionDep, 
+    current_user: CurrentUser, 
+    id: uuid.UUID,
+    background_tasks: BackgroundTasks
+) -> Message:
     """
     Delete an item.
     """
@@ -234,6 +308,16 @@ async def delete_item(session: SessionDep, current_user: CurrentUser, id: uuid.U
             record_user_operation(operation="delete_item", status="permission_denied")
             raise HTTPException(status_code=403, detail="Not enough permissions")
 
+        # Save item info before deletion for the event
+        item_data = {
+            "id": str(item.id),
+            "title": item.title,
+            "description": item.description,
+            "owner_id": str(item.owner_id),
+            "event_type": "item_deleted",
+            "timestamp": str(uuid.uuid4())
+        }
+
         with time_db_query(operation="delete", table="items"):
             session.delete(item)
             session.commit()
@@ -245,6 +329,18 @@ async def delete_item(session: SessionDep, current_user: CurrentUser, id: uuid.U
         with time_cache_operation("delete"):
             await valkey.delete(cache_key)
             record_cache_operation("delete", "success")
+            
+        # Send item deleted event to Pulsar
+        background_tasks.add_task(
+            publish_item_event,
+            ITEM_DELETED_TOPIC,
+            item_data
+        )
+
+        # Publish item deleted event to Pulsar
+        pulsar_client = get_pulsar_client()
+        with pulsar_client.producer() as producer:
+            producer.send(ITEM_DELETED_TOPIC, value={"id": str(id)})
 
         record_user_operation(operation="delete_item", status="success")
         return Message(message="Item deleted successfully")
@@ -256,3 +352,21 @@ async def delete_item(session: SessionDep, current_user: CurrentUser, id: uuid.U
         raise HTTPException(
             status_code=500, detail=f"Failed to delete item: {str(e)}"
         )
+
+
+# Pulsar message publishing function using the pulsar_task decorator
+@pulsar_task(topic=ITEM_CREATED_TOPIC, dlq_topic=DLQ_TOPIC)
+async def publish_item_event(topic: str, item_data: dict) -> dict:
+    """
+    Publish an item event to a Pulsar topic.
+    This function is decorated with pulsar_task which handles
+    sending the message to Pulsar.
+    
+    Returns the event data for tracking.
+    """
+    # Add additional metadata to the message
+    item_data["published_at"] = str(uuid.uuid4())
+    item_data["topic"] = topic
+    
+    # This will be sent to Pulsar by the decorator
+    return item_data

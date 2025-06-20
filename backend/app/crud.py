@@ -1,5 +1,6 @@
 import uuid
 from typing import Any, Optional
+from datetime import datetime
 
 from sqlalchemy.orm import Session, joinedload
 from sqlmodel import select
@@ -15,6 +16,13 @@ from app.core.telemetry.decorators import trace_function, measure_performance
 from app.api.dependencies.metrics import (
     time_db_query,
     record_user_operation,
+)
+
+# Import messaging functions for user events
+from app.api.messaging.users import (
+    send_user_created_event,
+    send_user_updated_event,
+    send_user_deleted_event
 )
 
 
@@ -80,13 +88,25 @@ async def update_user_cached(db: Session, user_id: int, user_data: dict):
 
 # These functions are called by routes that already have metrics, so NO metrics here
 @measure_performance("create_user_db")  # Monitor slow DB operations
-def create_user(*, session: Session, user_create: UserCreate) -> User:
+async def create_user(*, session: Session, user_create: UserCreate) -> User:
     db_obj = User.model_validate(
         user_create, update={"hashed_password": get_password_hash(user_create.password)}
     )
     session.add(db_obj)
     session.commit()
     session.refresh(db_obj)
+    
+    # Send user created event asynchronously
+    user_data = {
+        "id": str(db_obj.id),
+        "email": db_obj.email,
+        "is_active": db_obj.is_active,
+        "is_superuser": db_obj.is_superuser,
+        "full_name": getattr(db_obj, "full_name", ""),
+        "created_at": datetime.now().isoformat()
+    }
+    await send_user_created_event(user_data)
+    
     return db_obj
 
 
@@ -98,10 +118,26 @@ def update_user(*, session: Session, db_user: User, user_in: UserUpdate) -> Any:
         hashed_password = get_password_hash(password)
         extra_data["hashed_password"] = hashed_password
     
+    # Save original state for change tracking
+    updated_fields = list(user_data.keys())
+    
     db_user.sqlmodel_update(user_data, update=extra_data)
     session.add(db_user)
     session.commit()
     session.refresh(db_user)
+    
+    # Send user updated event asynchronously (in background)
+    user_update_data = {
+        "id": str(db_user.id),
+        "email": db_user.email,
+        "is_active": db_user.is_active,
+        "updated_fields": updated_fields,
+        "updated_at": datetime.now().isoformat()
+    }
+    # Use asyncio.create_task to avoid waiting
+    import asyncio
+    asyncio.create_task(send_user_updated_event(user_update_data))
+    
     return db_user
 
 
@@ -193,8 +229,20 @@ def delete_item(*, session: Session, item: Item) -> None:
 
 
 def delete_user(*, session: Session, user: User) -> None:
+    # Save user data for event before deletion
+    user_data = {
+        "id": str(user.id),
+        "email": user.email,
+        "deleted_at": datetime.now().isoformat()
+    }
+    
+    # Delete the user
     session.delete(user)
     session.commit()
+    
+    # Send user deleted event asynchronously
+    import asyncio
+    asyncio.create_task(send_user_deleted_event(user_data))
 
 
 def is_superuser(user: User) -> bool:
