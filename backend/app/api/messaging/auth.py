@@ -5,8 +5,9 @@ import uuid
 from datetime import datetime
 from typing import Dict, Any
 
-from app.core.pulsar.decorators import pulsar_task, pulsar_consumer
-from app.core.pulsar.client import PulsarClient
+# Import from the package directly to ensure config is loaded first
+from app.core.pulsar import pulsar_task, PulsarClient
+from app.core.pulsar.decorators import pulsar_consumer
 
 # Define topic constants for authentication events
 AUTH_LOGIN_TOPIC = "persistent://public/default/auth-login"

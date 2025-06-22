@@ -31,6 +31,8 @@ dependencies = [
     "grafana-client (>=4.3.2,<5.0.0)",
     "prometheus-fastapi-instrumentator (>=7.1.0,<8.0.0)",
     "pulsar (>=2.0.2,<3.0.0)",
+    "pulsar-client (>=3.7.0,<4.0.0)",
+    "aiohttp (>=3.12.13,<4.0.0)",
 ]
 
 [tool.uv]

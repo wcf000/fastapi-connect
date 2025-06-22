@@ -12,6 +12,7 @@ from app.api.dependencies.metrics import setup_api_info, track_requests_middlewa
 from app.core.prometheus.middleware import PrometheusMiddleware
 from app.core.pulsar.client import PulsarClient
 from app.core.pulsar.background import start_background_processors
+from app.core.pulsar.config_override import *  # Add this import at the top, before other imports
 
 
 def custom_generate_unique_id(route: APIRoute) -> str:

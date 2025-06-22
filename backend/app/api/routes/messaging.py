@@ -11,7 +11,7 @@ from app.api.deps import CurrentUser, SessionDep
 from app.models import User, Message
 from app.core.pulsar.client import PulsarClient
 from app.core.pulsar.decorators import pulsar_task, pulsar_consumer
-from app.api.dependencies.metrics import record_user_operation, time_operation
+from app.api.dependencies.metrics import record_user_operation, time_cache_operation
 
 # Define router with prefix and tag
 router = APIRouter(prefix="/messaging", tags=["messaging"])
@@ -61,7 +61,7 @@ async def send_message(
     This endpoint allows users to send messages to different Pulsar topics
     for asynchronous processing.
     """
-    with time_operation("send_message"):
+    with time_cache_operation("send_message"):
         # Prepare message data with user context
         message_data = {
             "content": message.content,

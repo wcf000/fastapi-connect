@@ -1,6 +1,10 @@
 import httpx
+import json
+import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel
+
+logger = logging.getLogger(__name__)
 
 from app.core.config import settings
 from app.core.valkey_init import get_valkey
@@ -10,7 +14,7 @@ from app.core.telemetry.telemetry import get_telemetry
 # Import the proper config objects
 from app.core.prometheus.config import get_prometheus_config
 from app.core.grafana.config import GrafanaConfig
-from app.core.pulsar.health_check import pulsar_health
+from app.core.pulsar.health_check import PulsarHealth
 
 router = APIRouter()
 
@@ -89,18 +93,41 @@ async def health_check():
         
     # 5. Check Pulsar health
     try:
-        pulsar_health_status = await pulsar_health.get_health_status()
+        # Create a PulsarHealth instance
+        pulsar_client = PulsarHealth()
+        pulsar_health_status = await pulsar_client.get_health_status()
         pulsar_data = pulsar_health_status.body.decode('utf-8')
-        import json
         pulsar_json = json.loads(pulsar_data)
-        pulsar_healthy = pulsar_json.get("healthy", False)
+        
+        # If connection is OK but only producer or consumer failed, consider it degraded but working
+        connection_ok = pulsar_json.get("details", {}).get("connection", False)
+        
+        # If connection is OK, consider Pulsar basically functional
+        # This is more realistic for health checks - if broker is accessible, service is available
+        pulsar_healthy = connection_ok
+        
+        # Get producer/consumer status for detailed reporting
+        producer_ok = pulsar_json.get("details", {}).get("producer", False)
+        consumer_ok = pulsar_json.get("details", {}).get("consumer", False)
+        
+        # Set the appropriate status - if connected but not fully functional, mark as degraded
+        pulsar_status = "disconnected"
+        if connection_ok:
+            if producer_ok and consumer_ok:
+                pulsar_status = "connected"
+            else:
+                pulsar_status = "degraded"
+        
+        # Detailed diagnostics
         details["pulsar"] = {
-            "status": "connected" if pulsar_healthy else "disconnected",
-            "connection": pulsar_json.get("details", {}).get("connection", False),
-            "producer": pulsar_json.get("details", {}).get("producer", False),
-            "consumer": pulsar_json.get("details", {}).get("consumer", False),
+            "status": pulsar_status,
+            "connection": connection_ok,
+            "producer": producer_ok,
+            "consumer": consumer_ok,
+            "check_duration": pulsar_json.get("diagnostics", {}).get("check_duration_seconds", 0),
         }
     except Exception as e:
+        logger.exception(f"Pulsar health check failed: {e}")
         pulsar_healthy = False
         details["pulsar_error"] = str(e)
         details["pulsar"] = {"status": "disconnected"}

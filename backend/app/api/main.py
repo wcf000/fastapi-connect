@@ -1,5 +1,8 @@
 from fastapi import APIRouter
 
+# Import Pulsar configuration override first
+from app.core.pulsar.config_override import *
+
 from app.api.routes import items, login, private, users, utils, health, messaging
 from app.core.config import settings
 
