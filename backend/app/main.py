@@ -58,6 +58,25 @@ app.include_router(api_router, prefix=settings.API_V1_STR)
 # Initialize Pulsar client
 pulsar_client = PulsarClient()
 
+# Database startup event - initialize either PostgreSQL or Supabase
+@app.on_event("startup")
+async def startup_database():
+    import os
+    from app.core.db_utils.db_selector import get_db_client
+    
+    # Check if we're using Supabase
+    supabase_url = os.getenv("SUPABASE_URL", "")
+    supabase_key = os.getenv("SUPABASE_ANON_KEY", "")
+    
+    if supabase_url.strip() and supabase_key.strip():
+        print("Using Supabase as the database backend")
+        # No additional initialization needed for Supabase
+    else:
+        print("Using PostgreSQL as the database backend")
+        # Initialize PostgreSQL
+        from app.core.db import init_db
+        init_db()
+
 # Valkey startup and shutdown events
 @app.on_event("startup")
 async def startup_db_client():

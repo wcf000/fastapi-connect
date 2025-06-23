@@ -33,6 +33,8 @@ dependencies = [
     "pulsar (>=2.0.2,<3.0.0)",
     "pulsar-client (>=3.7.0,<4.0.0)",
     "aiohttp (>=3.12.13,<4.0.0)",
+    "supabase (>=2.15.3,<3.0.0)",
+    "python-dotenv (>=1.1.0,<2.0.0)",
 ]
 
 [tool.uv]

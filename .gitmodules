@@ -20,3 +20,9 @@
 [submodule "backend/app/core/pulsar"]
 	path = backend/app/core/pulsar
 	url = https://github.com/wcf000/pulsar-client.git
+[submodule "backend/app/core/db_utils"]
+	path = backend/app/core/db_utils
+	url = https://github.com/wcf000/postgres-db-utils.git
+[submodule "backend/app/core/third_party_integrations/supabase_home"]
+	path = backend/app/core/third_party_integrations/supabase_home
+	url = https://github.com/wcf000/supabase-python-template.git

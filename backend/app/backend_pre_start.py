@@ -1,10 +1,12 @@
 import logging
+import os
 
 from sqlalchemy import Engine
 from sqlmodel import Session, select
 from tenacity import after_log, before_log, retry, stop_after_attempt, wait_fixed
 
 from app.core.db import engine
+from app.core.config import settings
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -29,9 +31,37 @@ def init(db_engine: Engine) -> None:
         raise e
 
 
+def init_supabase() -> None:
+    """Initialize and check Supabase connection"""
+    try:
+        from app.core.third_party_integrations.supabase_home.init import get_supabase_client
+        from app.core.third_party_integrations.supabase_home.tests._verify_supabase_connection import run_verification
+
+        logger.info("Verifying Supabase connection...")
+        success = run_verification()
+        if not success:
+            logger.error("Supabase connection verification failed!")
+            raise RuntimeError("Failed to connect to Supabase")
+        logger.info("Supabase connection verified successfully")
+    except Exception as e:
+        logger.error(f"Error connecting to Supabase: {e}")
+        raise e
+
+
 def main() -> None:
     logger.info("Initializing service")
-    init(engine)
+
+    # Determine which database to use
+    supabase_url = getattr(settings, "SUPABASE_URL", "") or os.getenv("SUPABASE_URL", "")
+    supabase_key = getattr(settings, "SUPABASE_ANON_KEY", "") or os.getenv("SUPABASE_ANON_KEY", "")
+
+    if supabase_url.strip() and supabase_key.strip():
+        logger.info("Using Supabase backend")
+        init_supabase()
+    else:
+        logger.info("Using PostgreSQL backend")
+        init(engine)
+
     logger.info("Service finished initializing")
 
 
