@@ -1,4 +1,12 @@
 import os
+from pathlib import Path
+from dotenv import load_dotenv
+from app.core.utils.sensitive import load_environment_files
+
+# Load environment variables using our utility function
+load_environment_files()
+
+# Now import everything else
 from fastapi import FastAPI
 from fastapi.routing import APIRoute
 from starlette.middleware.cors import CORSMiddleware
@@ -13,6 +21,7 @@ from app.core.prometheus.middleware import PrometheusMiddleware
 from app.core.pulsar.client import PulsarClient
 from app.core.pulsar.background import start_background_processors
 from app.core.pulsar.config_override import *  # Add this import at the top, before other imports
+from app.core.mcp_server import init_mcp  # Import MCP initialization function
 
 
 def custom_generate_unique_id(route: APIRoute) -> str:
@@ -64,18 +73,27 @@ async def startup_database():
     import os
     from app.core.db_utils.db_selector import get_db_client
     
-    # Check if we're using Supabase
-    supabase_url = os.getenv("SUPABASE_URL", "")
-    supabase_key = os.getenv("SUPABASE_ANON_KEY", "")
-    
-    if supabase_url.strip() and supabase_key.strip():
-        print("Using Supabase as the database backend")
-        # No additional initialization needed for Supabase
-    else:
-        print("Using PostgreSQL as the database backend")
-        # Initialize PostgreSQL
-        from app.core.db import init_db
-        init_db()
+    try:
+        # Use the db_selector to determine which database to use
+        db_client = get_db_client()
+        
+        # Check what type of client was returned
+        if hasattr(db_client, 'auth'):  # This is likely a Supabase client
+            print("Using Supabase as the database backend")
+            app.state.db_client = db_client
+        else:  # This is likely a SQLModel Session
+            print("Using PostgreSQL as the database backend")
+            # The PostgreSQL database was already initialized in get_db_client()
+            app.state.db_client = db_client
+            
+    except Exception as e:
+        print(f"Error initializing database: {e}")
+        
+        # For development only: allow running without database
+        if os.getenv("ALLOW_NO_DB", "").lower() in ("true", "1", "yes"):
+            print("Warning: Running without database connection")
+        else:
+            raise  # Re-raise the exception to fail application startup
 
 # Valkey startup and shutdown events
 @app.on_event("startup")
@@ -93,6 +111,13 @@ async def startup_pulsar_client():
     # Start background processors for Pulsar message consumption
     app.state.background_tasks = await start_background_processors()
     print("Pulsar background processors started")
+
+# MCP server startup event
+@app.on_event("startup")
+async def startup_mcp_server():
+    # Initialize MCP server with the FastAPI app
+    app.state.mcp = init_mcp(app)
+    print("Model Context Protocol (MCP) server initialized")
 
 @app.on_event("shutdown")
 async def shutdown_db_client():

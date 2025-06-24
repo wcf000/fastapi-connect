@@ -26,3 +26,6 @@
 [submodule "backend/app/core/third_party_integrations/supabase_home"]
 	path = backend/app/core/third_party_integrations/supabase_home
 	url = https://github.com/wcf000/supabase-python-template.git
+[submodule "backend/app/model_context_protocol"]
+	path = backend/app/model_context_protocol
+	url = https://github.com/wcf000/lightspeed_mcp.git

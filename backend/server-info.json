@@ -1,0 +1,940 @@
+{
+  "name": "Fast Supabase MCP Server",
+  "instructions": null,
+  "fastmcp_version": "2.9.0",
+  "mcp_version": "1.9.4",
+  "server_version": "2.9.0",
+  "tools": [
+    {
+      "key": "monitoring_health_response",
+      "name": "monitoring_health_response",
+      "description": "Generate FastAPI response for telemetry health check.\n\n\n**Responses:**\n\n- **200** (Success): Telemetry health status\n  - Content-Type: `application/json`",
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      },
+      "annotations": null,
+      "tags": [
+        "monitoring"
+      ],
+      "enabled": true
+    },
+    {
+      "key": "login_login_access_token",
+      "name": "login_login_access_token",
+      "description": "OAuth2 compatible token login with rate limiting protection\n\n\n**Responses:**\n\n- **200** (Success): Successful Response\n  - Content-Type: `application/json`\n\n  - **Response Properties:**\n\n  - **Example:**\n```json\n{\n  \"access_token\": \"string\",\n  \"token_type\": \"bearer\"\n}\n```\n\n- **422**: Validation Error\n  - Content-Type: `application/json`\n\n  - **Response Properties:**\n\n  - **Example:**\n```json\n{\n  \"detail\": [\n    \"unknown_type\"\n  ]\n}\n```",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "grant_type": {
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^password$"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Grant Type"
+          },
+          "username": {
+            "type": "string",
+            "title": "Username"
+          },
+          "password": {
+            "type": "string",
+            "title": "Password"
+          },
+          "scope": {
+            "type": "string",
+            "title": "Scope",
+            "default": ""
+          },
+          "client_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Id"
+          },
+          "client_secret": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Secret"
+          }
+        },
+        "required": [
+          "username",
+          "password"
+        ]
+      },
+      "annotations": null,
+      "tags": [
+        "login"
+      ],
+      "enabled": true
+    },
+    {
+      "key": "login_test_token",
+      "name": "login_test_token",
+      "description": "Test access token\n\n\n**Responses:**\n\n- **200** (Success): Successful Response\n  - Content-Type: `application/json`\n\n  - **Response Properties:**\n\n  - **Example:**\n```json\n{\n  \"email\": \"user@example.com\",\n  \"is_active\": true,\n  \"is_superuser\": false,\n  \"id\": \"123e4567-e89b-12d3-a456-426614174000\"\n}\n```",
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      },
+      "annotations": null,
+      "tags": [
+        "login"
+      ],
+      "enabled": true
+    },
+    {
+      "key": "login_recover_password",
+      "name": "login_recover_password",
+      "description": "Password Recovery with rate limiting\n\n\n**Path Parameters:**\n\n- **email** (Required): No description.\n\n\n**Responses:**\n\n- **200** (Success): Successful Response\n  - Content-Type: `application/json`\n\n  - **Response Properties:**\n\n  - **Example:**\n```json\n{\n  \"message\": \"string\"\n}\n```\n\n- **422**: Validation Error\n  - Content-Type: `application/json`\n\n  - **Response Properties:**\n\n  - **Example:**\n```json\n{\n  \"detail\": [\n    \"unknown_type\"\n  ]\n}\n```",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "title": "Email"
+          }
+        },
+        "required": [
+          "email"
+        ]
+      },
+      "annotations": null,
+      "tags": [
+        "login"
+      ],
+      "enabled": true
+    },
+    {
+      "key": "login_reset_password",
+      "name": "login_reset_password",
+      "description": "Reset password\n\n\n**Responses:**\n\n- **200** (Success): Successful Response\n  - Content-Type: `application/json`\n\n  - **Response Properties:**\n\n  - **Example:**\n```json\n{\n  \"message\": \"string\"\n}\n```\n\n- **422**: Validation Error\n  - Content-Type: `application/json`\n\n  - **Response Properties:**\n\n  - **Example:**\n```json\n{\n  \"detail\": [\n    \"unknown_type\"\n  ]\n}\n```",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "token": {
+            "type": "string",
+            "title": "Token"
+          },
+          "new_password": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 8,
+            "title": "New Password"
+          }
+        },
+        "required": [
+          "token",
+          "new_password"
+        ]
+      },
+      "annotations": null,
+      "tags": [
+        "login"
+      ],
+      "enabled": true
+    },
+    {
+      "key": "login_recover_password_html_content",
+      "name": "login_recover_password_html_content",
+      "description": "HTML Content for Password Recovery\n\n\n**Path Parameters:**\n\n- **email** (Required): No description.\n\n\n**Responses:**\n\n- **200** (Success): Successful Response\n  - Content-Type: `text/html`\n\n  - **Example:**\n```json\n\"string\"\n```\n\n- **422**: Validation Error\n  - Content-Type: `application/json`\n\n  - **Response Properties:**\n\n  - **Example:**\n```json\n{\n  \"detail\": [\n    \"unknown_type\"\n  ]\n}\n```",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "title": "Email"
+          }
+        },
+        "required": [
+          "email"
+        ]
+      },
+      "annotations": null,
+      "tags": [
+        "login"
+      ],
+      "enabled": true
+    },
+    {
+      "key": "users_read_users",
+      "name": "users_read_users",
+      "description": "Retrieve users.\n\n\n**Query Parameters:**\n\n- **skip**: No description.\n\n- **limit**: No description.\n\n\n**Responses:**\n\n- **200** (Success): Successful Response\n  - Content-Type: `application/json`\n\n  - **Response Properties:**\n\n  - **Example:**\n```json\n{\n  \"data\": [\n    \"unknown_type\"\n  ],\n  \"count\": 1\n}\n```\n\n- **422**: Validation Error\n  - Content-Type: `application/json`\n\n  - **Response Properties:**\n\n  - **Example:**\n```json\n{\n  \"detail\": [\n    \"unknown_type\"\n  ]\n}\n```",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "skip": {
+            "type": "integer",
+            "title": "Skip",
+            "default": 0
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit",
+            "default": 100
+          }
+        },
+        "required": []
+      },
+      "annotations": null,
+      "tags": [
+        "users"
+      ],
+      "enabled": true
+    },
+    {
+      "key": "users_create_user",
+      "name": "users_create_user",
+      "description": "Create new user.\n\n\n**Responses:**\n\n- **200** (Success): Successful Response\n  - Content-Type: `application/json`\n\n  - **Response Properties:**\n\n  - **Example:**\n```json\n{\n  \"email\": \"user@example.com\",\n  \"is_active\": true,\n  \"is_superuser\": false,\n  \"id\": \"123e4567-e89b-12d3-a456-426614174000\"\n}\n```\n\n- **422**: Validation Error\n  - Content-Type: `application/json`\n\n  - **Response Properties:**\n\n  - **Example:**\n```json\n{\n  \"detail\": [\n    \"unknown_type\"\n  ]\n}\n```",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "maxLength": 255,
+            "format": "email",
+            "title": "Email"
+          },
+          "is_active": {
+            "type": "boolean",
+            "title": "Is Active",
+            "default": true
+          },
+          "is_superuser": {
+            "type": "boolean",
+            "title": "Is Superuser",
+            "default": false
+          },
+          "full_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Full Name"
+          },
+          "password": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 8,
+            "title": "Password"
+          }
+        },
+        "required": [
+          "email",
+          "password"
+        ]
+      },
+      "annotations": null,
+      "tags": [
+        "users"
+      ],
+      "enabled": true
+    },
+    {
+      "key": "users_read_user_me",
+      "name": "users_read_user_me",
+      "description": "Get current user.\n\n\n**Responses:**\n\n- **200** (Success): Successful Response\n  - Content-Type: `application/json`\n\n  - **Response Properties:**\n\n  - **Example:**\n```json\n{\n  \"email\": \"user@example.com\",\n  \"is_active\": true,\n  \"is_superuser\": false,\n  \"id\": \"123e4567-e89b-12d3-a456-426614174000\"\n}\n```",
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      },
+      "annotations": null,
+      "tags": [
+        "users"
+      ],
+      "enabled": true
+    },
+    {
+      "key": "users_delete_user_me",
+      "name": "users_delete_user_me",
+      "description": "Delete own user.\n\n\n**Responses:**\n\n- **200** (Success): Successful Response\n  - Content-Type: `application/json`\n\n  - **Response Properties:**\n\n  - **Example:**\n```json\n{\n  \"message\": \"string\"\n}\n```",
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      },
+      "annotations": null,
+      "tags": [
+        "users"
+      ],
+      "enabled": true
+    },
+    {
+      "key": "users_update_user_me",
+      "name": "users_update_user_me",
+      "description": "Update own user.\n\n\n**Responses:**\n\n- **200** (Success): Successful Response\n  - Content-Type: `application/json`\n\n  - **Response Properties:**\n\n  - **Example:**\n```json\n{\n  \"email\": \"user@example.com\",\n  \"is_active\": true,\n  \"is_superuser\": false,\n  \"id\": \"123e4567-e89b-12d3-a456-426614174000\"\n}\n```\n\n- **422**: Validation Error\n  - Content-Type: `application/json`\n\n  - **Response Properties:**\n\n  - **Example:**\n```json\n{\n  \"detail\": [\n    \"unknown_type\"\n  ]\n}\n```",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "full_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Full Name"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255,
+                "format": "email"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          }
+        },
+        "required": []
+      },
+      "annotations": null,
+      "tags": [
+        "users"
+      ],
+      "enabled": true
+    },
+    {
+      "key": "users_update_password_me",
+      "name": "users_update_password_me",
+      "description": "Update own password.\n\n\n**Responses:**\n\n- **200** (Success): Successful Response\n  - Content-Type: `application/json`\n\n  - **Response Properties:**\n\n  - **Example:**\n```json\n{\n  \"message\": \"string\"\n}\n```\n\n- **422**: Validation Error\n  - Content-Type: `application/json`\n\n  - **Response Properties:**\n\n  - **Example:**\n```json\n{\n  \"detail\": [\n    \"unknown_type\"\n  ]\n}\n```",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "current_password": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 8,
+            "title": "Current Password"
+          },
+          "new_password": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 8,
+            "title": "New Password"
+          }
+        },
+        "required": [
+          "current_password",
+          "new_password"
+        ]
+      },
+      "annotations": null,
+      "tags": [
+        "users"
+      ],
+      "enabled": true
+    },
+    {
+      "key": "users_register_user",
+      "name": "users_register_user",
+      "description": "Create new user without the need to be logged in.\n\n\n**Responses:**\n\n- **200** (Success): Successful Response\n  - Content-Type: `application/json`\n\n  - **Response Properties:**\n\n  - **Example:**\n```json\n{\n  \"email\": \"user@example.com\",\n  \"is_active\": true,\n  \"is_superuser\": false,\n  \"id\": \"123e4567-e89b-12d3-a456-426614174000\"\n}\n```\n\n- **422**: Validation Error\n  - Content-Type: `application/json`\n\n  - **Response Properties:**\n\n  - **Example:**\n```json\n{\n  \"detail\": [\n    \"unknown_type\"\n  ]\n}\n```",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "maxLength": 255,
+            "format": "email",
+            "title": "Email"
+          },
+          "password": {
+            "type": "string",
+            "maxLength": 100,
+            "minLength": 8,
+            "title": "Password"
+          },
+          "full_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Full Name"
+          }
+        },
+        "required": [
+          "email",
+          "password"
+        ]
+      },
+      "annotations": null,
+      "tags": [
+        "users"
+      ],
+      "enabled": true
+    },
+    {
+      "key": "users_read_user_by_id",
+      "name": "users_read_user_by_id",
+      "description": "Get a specific user by id.\n\n\n**Path Parameters:**\n\n- **user_id** (Required): No description.\n\n\n**Responses:**\n\n- **200** (Success): Successful Response\n  - Content-Type: `application/json`\n\n  - **Response Properties:**\n\n  - **Example:**\n```json\n{\n  \"email\": \"user@example.com\",\n  \"is_active\": true,\n  \"is_superuser\": false,\n  \"id\": \"123e4567-e89b-12d3-a456-426614174000\"\n}\n```\n\n- **422**: Validation Error\n  - Content-Type: `application/json`\n\n  - **Response Properties:**\n\n  - **Example:**\n```json\n{\n  \"detail\": [\n    \"unknown_type\"\n  ]\n}\n```",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "User Id"
+          }
+        },
+        "required": [
+          "user_id"
+        ]
+      },
+      "annotations": null,
+      "tags": [
+        "users"
+      ],
+      "enabled": true
+    },
+    {
+      "key": "users_delete_user",
+      "name": "users_delete_user",
+      "description": "Delete a user.\n\n\n**Path Parameters:**\n\n- **user_id** (Required): No description.\n\n\n**Responses:**\n\n- **200** (Success): Successful Response\n  - Content-Type: `application/json`\n\n  - **Response Properties:**\n\n  - **Example:**\n```json\n{\n  \"message\": \"string\"\n}\n```\n\n- **422**: Validation Error\n  - Content-Type: `application/json`\n\n  - **Response Properties:**\n\n  - **Example:**\n```json\n{\n  \"detail\": [\n    \"unknown_type\"\n  ]\n}\n```",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "User Id"
+          }
+        },
+        "required": [
+          "user_id"
+        ]
+      },
+      "annotations": null,
+      "tags": [
+        "users"
+      ],
+      "enabled": true
+    },
+    {
+      "key": "users_update_user",
+      "name": "users_update_user",
+      "description": "Update a user.\n\n\n**Path Parameters:**\n\n- **user_id** (Required): No description.\n\n\n**Responses:**\n\n- **200** (Success): Successful Response\n  - Content-Type: `application/json`\n\n  - **Response Properties:**\n\n  - **Example:**\n```json\n{\n  \"email\": \"user@example.com\",\n  \"is_active\": true,\n  \"is_superuser\": false,\n  \"id\": \"123e4567-e89b-12d3-a456-426614174000\"\n}\n```\n\n- **422**: Validation Error\n  - Content-Type: `application/json`\n\n  - **Response Properties:**\n\n  - **Example:**\n```json\n{\n  \"detail\": [\n    \"unknown_type\"\n  ]\n}\n```",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "user_id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "User Id"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255,
+                "format": "email"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "is_active": {
+            "type": "boolean",
+            "title": "Is Active",
+            "default": true
+          },
+          "is_superuser": {
+            "type": "boolean",
+            "title": "Is Superuser",
+            "default": false
+          },
+          "full_name": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Full Name"
+          },
+          "password": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 100,
+                "minLength": 8
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Password"
+          }
+        },
+        "required": [
+          "user_id"
+        ]
+      },
+      "annotations": null,
+      "tags": [
+        "users"
+      ],
+      "enabled": true
+    },
+    {
+      "key": "utils_test_email",
+      "name": "utils_test_email",
+      "description": "Test emails.\n\n\n**Query Parameters:**\n\n- **email_to** (Required): No description.\n\n\n**Responses:**\n\n- **201** (Success): Successful Response\n  - Content-Type: `application/json`\n\n  - **Response Properties:**\n\n  - **Example:**\n```json\n{\n  \"message\": \"string\"\n}\n```\n\n- **422**: Validation Error\n  - Content-Type: `application/json`\n\n  - **Response Properties:**\n\n  - **Example:**\n```json\n{\n  \"detail\": [\n    \"unknown_type\"\n  ]\n}\n```",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "email_to": {
+            "type": "string",
+            "format": "email",
+            "title": "Email To"
+          }
+        },
+        "required": [
+          "email_to"
+        ]
+      },
+      "annotations": null,
+      "tags": [
+        "utils"
+      ],
+      "enabled": true
+    },
+    {
+      "key": "utils_health_check",
+      "name": "utils_health_check",
+      "description": "Health Check\n\n\n**Responses:**\n\n- **200** (Success): Successful Response\n  - Content-Type: `application/json`\n\n  - **Example:**\n```json\ntrue\n```",
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      },
+      "annotations": null,
+      "tags": [
+        "utils"
+      ],
+      "enabled": true
+    },
+    {
+      "key": "items_read_items",
+      "name": "items_read_items",
+      "description": "Retrieve items.\n\n\n**Query Parameters:**\n\n- **skip**: No description.\n\n- **limit**: No description.\n\n\n**Responses:**\n\n- **200** (Success): Successful Response\n  - Content-Type: `application/json`\n\n  - **Response Properties:**\n\n  - **Example:**\n```json\n{\n  \"data\": [\n    \"unknown_type\"\n  ],\n  \"count\": 1\n}\n```\n\n- **422**: Validation Error\n  - Content-Type: `application/json`\n\n  - **Response Properties:**\n\n  - **Example:**\n```json\n{\n  \"detail\": [\n    \"unknown_type\"\n  ]\n}\n```",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "skip": {
+            "type": "integer",
+            "title": "Skip",
+            "default": 0
+          },
+          "limit": {
+            "type": "integer",
+            "title": "Limit",
+            "default": 100
+          }
+        },
+        "required": []
+      },
+      "annotations": null,
+      "tags": [
+        "items"
+      ],
+      "enabled": true
+    },
+    {
+      "key": "items_create_item",
+      "name": "items_create_item",
+      "description": "Create new item.\n\n\n**Responses:**\n\n- **200** (Success): Successful Response\n  - Content-Type: `application/json`\n\n  - **Response Properties:**\n\n  - **Example:**\n```json\n{\n  \"title\": \"string\",\n  \"description\": \"unknown_type\",\n  \"id\": \"123e4567-e89b-12d3-a456-426614174000\",\n  \"owner_id\": \"123e4567-e89b-12d3-a456-426614174000\"\n}\n```\n\n- **422**: Validation Error\n  - Content-Type: `application/json`\n\n  - **Response Properties:**\n\n  - **Example:**\n```json\n{\n  \"detail\": [\n    \"unknown_type\"\n  ]\n}\n```",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "title": {
+            "type": "string",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Title"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          }
+        },
+        "required": [
+          "title"
+        ]
+      },
+      "annotations": null,
+      "tags": [
+        "items"
+      ],
+      "enabled": true
+    },
+    {
+      "key": "items_read_item",
+      "name": "items_read_item",
+      "description": "Get item by ID.\n\n\n**Path Parameters:**\n\n- **id** (Required): No description.\n\n\n**Responses:**\n\n- **200** (Success): Successful Response\n  - Content-Type: `application/json`\n\n  - **Response Properties:**\n\n  - **Example:**\n```json\n{\n  \"title\": \"string\",\n  \"description\": \"unknown_type\",\n  \"id\": \"123e4567-e89b-12d3-a456-426614174000\",\n  \"owner_id\": \"123e4567-e89b-12d3-a456-426614174000\"\n}\n```\n\n- **422**: Validation Error\n  - Content-Type: `application/json`\n\n  - **Response Properties:**\n\n  - **Example:**\n```json\n{\n  \"detail\": [\n    \"unknown_type\"\n  ]\n}\n```",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "annotations": null,
+      "tags": [
+        "items"
+      ],
+      "enabled": true
+    },
+    {
+      "key": "items_update_item",
+      "name": "items_update_item",
+      "description": "Update an item.\n\n\n**Path Parameters:**\n\n- **id** (Required): No description.\n\n\n**Responses:**\n\n- **200** (Success): Successful Response\n  - Content-Type: `application/json`\n\n  - **Response Properties:**\n\n  - **Example:**\n```json\n{\n  \"title\": \"string\",\n  \"description\": \"unknown_type\",\n  \"id\": \"123e4567-e89b-12d3-a456-426614174000\",\n  \"owner_id\": \"123e4567-e89b-12d3-a456-426614174000\"\n}\n```\n\n- **422**: Validation Error\n  - Content-Type: `application/json`\n\n  - **Response Properties:**\n\n  - **Example:**\n```json\n{\n  \"detail\": [\n    \"unknown_type\"\n  ]\n}\n```",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255,
+                "minLength": 1
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string",
+                "maxLength": 255
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "annotations": null,
+      "tags": [
+        "items"
+      ],
+      "enabled": true
+    },
+    {
+      "key": "items_delete_item",
+      "name": "items_delete_item",
+      "description": "Delete an item.\n\n\n**Path Parameters:**\n\n- **id** (Required): No description.\n\n\n**Responses:**\n\n- **200** (Success): Successful Response\n  - Content-Type: `application/json`\n\n  - **Response Properties:**\n\n  - **Example:**\n```json\n{\n  \"message\": \"string\"\n}\n```\n\n- **422**: Validation Error\n  - Content-Type: `application/json`\n\n  - **Response Properties:**\n\n  - **Example:**\n```json\n{\n  \"detail\": [\n    \"unknown_type\"\n  ]\n}\n```",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "title": "Id"
+          }
+        },
+        "required": [
+          "id"
+        ]
+      },
+      "annotations": null,
+      "tags": [
+        "items"
+      ],
+      "enabled": true
+    },
+    {
+      "key": "health_health_check",
+      "name": "health_health_check",
+      "description": "Health check endpoint for the application.\nChecks if Valkey, Prometheus, Grafana, and Telemetry are available.\n\n\n**Responses:**\n\n- **200** (Success): Successful Response\n  - Content-Type: `application/json`\n\n  - **Response Properties:**\n\n  - **Example:**\n```json\n{\n  \"status\": \"string\",\n  \"valkey\": true,\n  \"prometheus\": true,\n  \"telemetry\": true,\n  \"pulsar\": true,\n  \"grafana\": true\n}\n```",
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      },
+      "annotations": null,
+      "tags": [
+        "health"
+      ],
+      "enabled": true
+    },
+    {
+      "key": "messaging_send_message",
+      "name": "messaging_send_message",
+      "description": "Send a message to a Pulsar topic.\n\nThis endpoint allows users to send messages to different Pulsar topics\nfor asynchronous processing.\n\n\n**Responses:**\n\n- **201** (Success): Successful Response\n  - Content-Type: `application/json`\n\n  - **Response Properties:**\n\n    - **id**: Message ID\n\n    - **status**: Message status\n\n    - **timestamp**: Message timestamp\n\n  - **Example:**\n```json\n{\n  \"id\": \"string\",\n  \"status\": \"string\",\n  \"timestamp\": \"string\"\n}\n```\n\n- **422**: Validation Error\n  - Content-Type: `application/json`\n\n  - **Response Properties:**\n\n  - **Example:**\n```json\n{\n  \"detail\": [\n    \"unknown_type\"\n  ]\n}\n```",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string",
+            "title": "Content",
+            "description": "Message content"
+          },
+          "topic": {
+            "type": "string",
+            "title": "Topic",
+            "description": "Pulsar topic to send message to"
+          },
+          "recipient_id": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "uuid"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Recipient Id",
+            "description": "Optional recipient user ID"
+          }
+        },
+        "required": [
+          "content",
+          "topic"
+        ]
+      },
+      "annotations": null,
+      "tags": [
+        "messaging"
+      ],
+      "enabled": true
+    },
+    {
+      "key": "messaging_list_topics",
+      "name": "messaging_list_topics",
+      "description": "List available Pulsar topics.\n\n\n**Responses:**\n\n- **200** (Success): Successful Response\n  - Content-Type: `application/json`\n\n  - **Example:**\n```json\n[\n  \"string\"\n]\n```",
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      },
+      "annotations": null,
+      "tags": [
+        "messaging"
+      ],
+      "enabled": true
+    },
+    {
+      "key": "messaging_get_topic_stats",
+      "name": "messaging_get_topic_stats",
+      "description": "Get statistics for a specific Pulsar topic.\n\n\n**Path Parameters:**\n\n- **topic** (Required): No description.\n\n\n**Responses:**\n\n- **200** (Success): Successful Response\n  - Content-Type: `application/json`\n\n  - **Response Properties:**\n\n  - **Example:**\n```json\n{\n  \"topic\": \"string\",\n  \"message_count\": 1,\n  \"producer_count\": 1,\n  \"subscription_count\": 1,\n  \"consumer_count\": 1\n}\n```\n\n- **422**: Validation Error\n  - Content-Type: `application/json`\n\n  - **Response Properties:**\n\n  - **Example:**\n```json\n{\n  \"detail\": [\n    \"unknown_type\"\n  ]\n}\n```",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "topic": {
+            "type": "string",
+            "title": "Topic"
+          }
+        },
+        "required": [
+          "topic"
+        ]
+      },
+      "annotations": null,
+      "tags": [
+        "messaging"
+      ],
+      "enabled": true
+    },
+    {
+      "key": "mcp_get_mcp_status",
+      "name": "mcp_get_mcp_status",
+      "description": "Get the status of the MCP server.\n\nReturns:\n    MCPStatusResponse: Status information about the MCP server\n\n\n**Responses:**\n\n- **200** (Success): Successful Response\n  - Content-Type: `application/json`\n\n  - **Response Properties:**\n\n  - **Example:**\n```json\n{\n  \"status\": \"string\",\n  \"version\": \"string\",\n  \"available_tools\": 1,\n  \"message\": \"string\",\n  \"available_resources\": 1\n}\n```\n\n- **404**: Not found",
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      },
+      "annotations": null,
+      "tags": [
+        "mcp"
+      ],
+      "enabled": true
+    },
+    {
+      "key": "mcp_health_check",
+      "name": "mcp_health_check",
+      "description": "Simple health check endpoint for the MCP server.\n\nReturns:\n    dict: Health status\n\n\n**Responses:**\n\n- **200** (Success): Successful Response\n  - Content-Type: `application/json`\n\n- **404**: Not found",
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      },
+      "annotations": null,
+      "tags": [
+        "mcp"
+      ],
+      "enabled": true
+    },
+    {
+      "key": "mcp_discovery",
+      "name": "mcp_discovery",
+      "description": "Discover all available MCP tools and resources.\n\nReturns:\n    dict: Lists of all tools and resources with their details\n\n\n**Responses:**\n\n- **200** (Success): Successful Response\n  - Content-Type: `application/json`\n\n- **404**: Not found",
+      "input_schema": {
+        "type": "object",
+        "properties": {},
+        "required": []
+      },
+      "annotations": null,
+      "tags": [
+        "mcp"
+      ],
+      "enabled": true
+    },
+    {
+      "key": "private_create_user",
+      "name": "private_create_user",
+      "description": "Create a new user.\n\n\n**Responses:**\n\n- **200** (Success): Successful Response\n  - Content-Type: `application/json`\n\n  - **Response Properties:**\n\n  - **Example:**\n```json\n{\n  \"email\": \"user@example.com\",\n  \"is_active\": true,\n  \"is_superuser\": false,\n  \"id\": \"123e4567-e89b-12d3-a456-426614174000\"\n}\n```\n\n- **422**: Validation Error\n  - Content-Type: `application/json`\n\n  - **Response Properties:**\n\n  - **Example:**\n```json\n{\n  \"detail\": [\n    \"unknown_type\"\n  ]\n}\n```",
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "email": {
+            "type": "string",
+            "title": "Email"
+          },
+          "password": {
+            "type": "string",
+            "title": "Password"
+          },
+          "full_name": {
+            "type": "string",
+            "title": "Full Name"
+          },
+          "is_verified": {
+            "type": "boolean",
+            "title": "Is Verified",
+            "default": false
+          }
+        },
+        "required": [
+          "email",
+          "password",
+          "full_name"
+        ]
+      },
+      "annotations": null,
+      "tags": [
+        "private"
+      ],
+      "enabled": true
+    },
+    {
+      "key": "add",
+      "name": "add",
+      "description": "Add two numbers, return result as an annotated Image (demo purpose).",
+      "input_schema": {
+        "properties": {
+          "a": {
+            "title": "A",
+            "type": "integer"
+          },
+          "b": {
+            "title": "B",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "a",
+          "b"
+        ],
+        "type": "object"
+      },
+      "annotations": null,
+      "tags": null,
+      "enabled": true
+    }
+  ],
+  "prompts": [],
+  "resources": [
+    {
+      "key": "config://app-version",
+      "uri": "config://app-version",
+      "name": "get_app_version",
+      "description": "Returns the application version.",
+      "mime_type": "text/plain",
+      "tags": null,
+      "enabled": true
+    }
+  ],
+  "templates": [],
+  "capabilities": {
+    "tools": {
+      "listChanged": true
+    },
+    "resources": {
+      "subscribe": false,
+      "listChanged": false
+    },
+    "prompts": {
+      "listChanged": false
+    },
+    "logging": {}
+  }
+}

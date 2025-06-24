@@ -159,6 +159,11 @@ class Settings(BaseSettings):
     # Pulsar messaging settings
     pulsar: PulsarSettings = PulsarSettings()
 
+    # Add Supabase configuration
+    SUPABASE_URL: str = ""
+    SUPABASE_ANON_KEY: str = ""
+    SUPABASE_SERVICE_ROLE_KEY: str = ""
+
     def _check_default_secret(self, var_name: str, value: str | None) -> None:
         if value == "changethis":
             message = (
