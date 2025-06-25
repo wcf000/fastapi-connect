@@ -2,6 +2,8 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 from app.core.utils.sensitive import load_environment_files
+import logging
+import sys
 
 # Load environment variables using our utility function
 load_environment_files()
@@ -22,6 +24,12 @@ from app.core.pulsar.client import PulsarClient
 from app.core.pulsar.background import start_background_processors
 from app.core.pulsar.config_override import *  # Add this import at the top, before other imports
 from app.core.mcp_server import init_mcp  # Import MCP initialization function
+
+logging.basicConfig(
+    level=logging.DEBUG,  # Or INFO if you want less verbosity
+    format="%(asctime)s %(levelname)s [%(name)s] %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
 
 
 def custom_generate_unique_id(route: APIRoute) -> str:

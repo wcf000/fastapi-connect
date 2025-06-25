@@ -114,12 +114,34 @@ async def delete_user(*, session: Optional[Session] = None, user: Optional[User]
 async def create_item(*, session: Optional[Session] = None, item_in: ItemCreate, 
                     owner_id: uuid.UUID) -> Item:
     """Create a new item using the appropriate database backend."""
-    if isinstance(_crud, supabase_crud.__class__):
-        return await _crud.create_item(item_in=item_in, owner_id=owner_id)
-    else:
-        if session is None:
-            raise ValueError("Session is required for PostgreSQL operations")
-        return await _crud.create_item(session=session, item_in=item_in, owner_id=owner_id)
+    logger = logging.getLogger(__name__)
+    logger.info(f"Creating item using {'Supabase' if isinstance(_crud, type(supabase_crud)) else 'PostgreSQL'} backend")
+    
+    try:
+        if isinstance(_crud, type(supabase_crud)):
+            # Log the Supabase state
+            from app.core.third_party_integrations.supabase_home.client import supabase
+            from app.core.third_party_integrations.supabase_home.init import get_supabase_client
+            
+            try:
+                # Check if Supabase client can be initialized
+                client = get_supabase_client()
+                logger.info("Supabase client initialized successfully")
+            except Exception as e:
+                logger.error(f"Error initializing Supabase client: {str(e)}")
+                raise ValueError(f"Failed to initialize Supabase client: {str(e)}")
+            
+            # Supabase doesn't need session
+            return await _crud.create_item(item_in=item_in, owner_id=owner_id)
+        else:
+            # SQLModel needs session
+            if session is None:
+                logger.error("Session is required for PostgreSQL operations but was None")
+                raise ValueError("Session is required for PostgreSQL operations")
+            return await _crud.create_item(session=session, item_in=item_in, owner_id=owner_id)
+    except Exception as e:
+        logger.exception(f"Error in create_item adapter: {str(e)}")
+        raise
 
 async def get_item(*, session: Optional[Session] = None, item_id: uuid.UUID) -> Optional[Item]:
     """Get an item by ID using the appropriate database backend."""
@@ -177,3 +199,28 @@ def is_superuser(user: User) -> bool:
 def is_active(user: User) -> bool:
     """Check if a user is active."""
     return user.is_active
+
+async def get_users(*, session: Optional[Session] = None, skip: int = 0, limit: int = 100) -> List[User]:
+    """Get all users using the appropriate database backend."""
+    if isinstance(_crud, type(supabase_crud)):
+        # Supabase doesn't need session
+        users = await _crud.get_users(skip=skip, limit=limit)
+        # Convert dictionary to User objects if needed
+        if users and isinstance(users[0], dict):
+            return [
+                User(
+                    id=uuid.UUID(user["id"]) if isinstance(user["id"], str) else user["id"],
+                    email=user["email"],
+                    is_active=user.get("is_active", True),
+                    is_superuser=user.get("is_superuser", False),
+                    full_name=user.get("full_name", ""),
+                    hashed_password=user.get("hashed_password", ""),
+                    items=[]  # Always use an empty list for now
+                ) for user in users
+            ]
+        return users
+    else:
+        # SQLModel needs session
+        if session is None:
+            raise ValueError("Session is required for PostgreSQL operations")
+        return await _crud.get_users(session=session, skip=skip, limit=limit)

@@ -52,17 +52,9 @@ async def read_users(session: SessionDep, skip: int = 0, limit: int = 100) -> An
             query_span.set_attribute("db.operation", "read")
             query_span.set_attribute("db.table", "users")
             
-            # Adapt based on whether we're using Supabase or PostgreSQL
-            if os.getenv("SUPABASE_URL", ""):
-                # Use Supabase CRUD
-                users = await crud.get_users(skip=skip, limit=limit)
-                count = len(users)  # Approximate count for now
-            else:
-                # Use PostgreSQL CRUD
-                count_statement = select(func.count()).select_from(User)
-                count = session.exec(count_statement).one()
-                statement = select(User).offset(skip).limit(limit)
-                users = session.exec(statement).all()
+            # Always use the adapter to get users
+            users = await crud.get_users(session=session, skip=skip, limit=limit)
+            count = len(users)  # Approximate count from the adapter
             
             query_span.set_attribute("db.rows_fetched", len(users))
 
@@ -140,7 +132,7 @@ async def create_user(user_in: UserCreate, session: SessionDep) -> Any:
 @trace_function("update_user_me")
 async def update_user_me(
     *, session: SessionDep, user_in: UserUpdateMe, current_user: CurrentUser
-) -> Any:
+) -> UserPublic:
     """
     Update own user.
     """
@@ -168,13 +160,15 @@ async def update_user_me(
             query_span.set_attribute("db.table", "users")
             
             user_data = user_in.model_dump(exclude_unset=True)
-            current_user.sqlmodel_update(user_data)
-            session.add(current_user)
-            session.commit()
-            session.refresh(current_user)
+            # Replace direct SQL operations with adapter call
+            updated_user = await crud.update_user(
+                session=session,
+                db_user=current_user,
+                user_in=UserUpdate(**user_data)
+            )
             
         span.set_attribute("operation.status", "success")
-        return current_user
+        return updated_user
     except HTTPException as he:
         span.set_attribute("error.type", "http_exception")
         span.set_attribute("error.status_code", he.status_code)
@@ -185,9 +179,11 @@ async def update_user_me(
         raise
 
 
+# Update password_me function to use adapter
+
 @router.patch("/me/password", response_model=Message)
 @trace_function("update_password_me")
-def update_password_me(
+async def update_password_me(
     *, session: SessionDep, body: UpdatePassword, current_user: CurrentUser
 ) -> Any:
     """
@@ -214,10 +210,10 @@ def update_password_me(
             query_span.set_attribute("db.operation", "update")
             query_span.set_attribute("db.table", "users")
             
-            hashed_password = get_password_hash(body.new_password)
-            current_user.hashed_password = hashed_password
-            session.add(current_user)
-            session.commit()
+            # Create UserUpdate with just the password
+            user_update = UserUpdate(password=body.new_password)
+            # Use adapter to update user
+            await crud.update_user(session=session, db_user=current_user, user_in=user_update)
             
         span.set_attribute("operation.status", "success")
         return Message(message="Password updated successfully")
@@ -242,9 +238,11 @@ def read_user_me(current_user: CurrentUser) -> Any:
     return current_user
 
 
+# Update delete_user_me to use adapter
+
 @router.delete("/me", response_model=Message)
 @trace_function("delete_user_me")
-def delete_user_me(session: SessionDep, current_user: CurrentUser) -> Any:
+async def delete_user_me(session: SessionDep, current_user: CurrentUser) -> Any:
     """
     Delete own user.
     """
@@ -264,8 +262,8 @@ def delete_user_me(session: SessionDep, current_user: CurrentUser) -> Any:
             query_span.set_attribute("db.operation", "delete")
             query_span.set_attribute("db.table", "users")
             
-            session.delete(current_user)
-            session.commit()
+            # Use adapter to delete user
+            await crud.delete_user(session=session, user=current_user)
             
         span.set_attribute("operation.status", "success")
         return Message(message="User deleted successfully")
@@ -325,9 +323,11 @@ async def register_user(session: SessionDep, user_in: UserRegister) -> Any:  # M
         raise
 
 
+# Update read_user_by_id to use adapter
+
 @router.get("/{user_id}", response_model=UserPublic)
 @trace_function("read_user_by_id")
-def read_user_by_id(
+async def read_user_by_id(
     user_id: uuid.UUID, session: SessionDep, current_user: CurrentUser
 ) -> Any:
     """
@@ -343,7 +343,8 @@ def read_user_by_id(
             query_span.set_attribute("db.operation", "read")
             query_span.set_attribute("db.table", "users")
             
-            user = session.get(User, user_id)
+            # Use adapter to get user
+            user = await crud.get_user(session=session, user_id=user_id)
             query_span.set_attribute("user.found", user is not None)
             
         if not user:
@@ -351,7 +352,7 @@ def read_user_by_id(
             span.set_attribute("failure.reason", "user_not_found")
             raise HTTPException(status_code=404, detail="User not found")
             
-        if user == current_user:
+        if user.id == current_user.id:  # Changed to compare IDs instead of objects
             span.set_attribute("operation.type", "read_self")
             span.set_attribute("operation.status", "success")
             return user
@@ -447,9 +448,11 @@ async def update_user(
         raise
 
 
+# Update delete_user to use adapter
+
 @router.delete("/{user_id}", dependencies=[Depends(get_current_active_superuser)])
 @trace_function("delete_user_by_id")
-def delete_user(
+async def delete_user(
     session: SessionDep, current_user: CurrentUser, user_id: uuid.UUID
 ) -> Message:
     """
@@ -465,7 +468,8 @@ def delete_user(
             query_span.set_attribute("db.operation", "read")
             query_span.set_attribute("db.table", "users")
             
-            user = session.get(User, user_id)
+            # Use adapter to get user
+            user = await crud.get_user(session=session, user_id=user_id)
             query_span.set_attribute("user.found", user is not None)
             
         if not user:
@@ -473,28 +477,34 @@ def delete_user(
             span.set_attribute("failure.reason", "user_not_found")
             raise HTTPException(status_code=404, detail="User not found")
             
-        if user == current_user:
+        if user.id == current_user.id:  # Changed to compare IDs
             span.set_attribute("operation.status", "failure")
             span.set_attribute("failure.reason", "self_delete_forbidden")
             raise HTTPException(
                 status_code=403, detail="Super users are not allowed to delete themselves"
             )
             
-        # Delete user and their items
+        # Delete user's items first
         with trace.get_tracer(__name__).start_as_current_span("db_query") as query_span:
             query_span.set_attribute("db.operation", "delete")
             query_span.set_attribute("db.table", "items")
             
-            statement = delete(Item).where(col(Item.owner_id) == user_id)
-            result = session.exec(statement)  # type: ignore
-            query_span.set_attribute("items.deleted", result.rowcount if hasattr(result, "rowcount") else 0)
+            # Get items by owner
+            items = await crud.get_items_by_owner(session=session, owner_id=user_id)
             
+            # Delete each item
+            for item in items:
+                await crud.delete_item(session=session, item_id=item.id)
+                
+            query_span.set_attribute("items.deleted", len(items))
+            
+        # Delete user
         with trace.get_tracer(__name__).start_as_current_span("db_query") as query_span:
             query_span.set_attribute("db.operation", "delete")
             query_span.set_attribute("db.table", "users")
             
-            session.delete(user)
-            session.commit()
+            # Use adapter to delete user
+            await crud.delete_user(session=session, user_id=user_id)
             
         span.set_attribute("operation.status", "success")
         span.set_attribute("operation.type", "delete_other")

@@ -1,6 +1,9 @@
 from datetime import timedelta
 from typing import Annotated, Any
 from datetime import datetime
+import sys
+import os
+import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Request, BackgroundTasks
 from fastapi.responses import HTMLResponse
@@ -31,12 +34,15 @@ from app.api.messaging.auth import (
     send_suspicious_activity_event
 )
 
+# Setup logger
+logger = logging.getLogger(__name__)
+
 router = APIRouter(tags=["login"])
 
 
 @router.post("/login/access-token")
 @trace_function("login_access_token")
-@measure_performance("login_performance")
+@measure_performance()
 async def login_access_token(
     request: Request,
     session: SessionDep,
@@ -75,9 +81,26 @@ async def login_access_token(
             auth_span.set_attribute("db.operation", "authenticate")
             auth_span.set_attribute("db.table", "users")
             
-            user = crud.authenticate(
-                session=session, email=form_data.username, password=form_data.password
-            )
+            try:
+                # Properly await the authenticate function since it's async
+                user = await crud.authenticate(
+                    session=session, email=form_data.username, password=form_data.password
+                )
+                auth_span.set_attribute("authentication.success", True if user else False)
+            except Exception as auth_error:
+                auth_span.set_attribute("authentication.error", str(auth_error))
+                auth_span.record_exception(auth_error)
+                logger.error(f"Authentication error: {str(auth_error)}")
+                
+                # Try Supabase auth as fallback if PostgreSQL fails
+                if "getaddrinfo failed" in str(auth_error) and os.getenv("SUPABASE_URL") and os.getenv("SUPABASE_ANON_KEY"):
+                    logger.warning("PostgreSQL connection failed, trying Supabase authentication")
+                    import app.supabase_crud as supabase_crud
+                    user = await supabase_crud.authenticate(email=form_data.username, password=form_data.password)
+                    auth_span.set_attribute("authentication.fallback", "supabase")
+                    auth_span.set_attribute("authentication.success", True if user else False)
+                else:
+                    raise
             
         if not user:
             span.set_attribute("login.status", "failure")
@@ -117,11 +140,11 @@ async def login_access_token(
         }
         background_tasks.add_task(send_login_event, login_event_data)
         
-        return Token(
-            access_token=security.create_access_token(
-                user.id, expires_delta=access_token_expires
-            )
+        # Create access token and then return the Token object
+        access_token = security.create_access_token(
+            user.id, expires_delta=access_token_expires
         )
+        return Token(access_token=access_token)
     except HTTPException:
         raise
     except Exception as e:
@@ -196,7 +219,7 @@ async def recover_password(
             query_span.set_attribute("db.operation", "read")
             query_span.set_attribute("db.table", "users")
             
-            user = crud.get_user_by_email(session=session, email=email)
+            user = await crud.get_user_by_email(session=session, email=email)
             query_span.set_attribute("user.found", user is not None)
 
         if not user:
@@ -246,7 +269,7 @@ async def recover_password(
 
 
 @router.post("/reset-password/")
-def reset_password(
+async def reset_password(
     session: SessionDep, 
     body: NewPassword,
     background_tasks: BackgroundTasks
@@ -261,7 +284,7 @@ def reset_password(
             raise HTTPException(status_code=400, detail="Invalid token")
             
         with time_db_query(operation="read", table="users"):
-            user = crud.get_user_by_email(session=session, email=email)
+            user = await crud.get_user_by_email(session=session, email=email)
             
         if not user:
             record_user_operation(operation="reset_password", status="user_not_found")
@@ -302,13 +325,13 @@ def reset_password(
     dependencies=[Depends(get_current_active_superuser)],
     response_class=HTMLResponse,
 )
-def recover_password_html_content(email: str, session: SessionDep) -> Any:
+async def recover_password_html_content(email: str, session: SessionDep) -> Any:
     """
     HTML Content for Password Recovery
     """
     try:
         with time_db_query(operation="read", table="users"):
-            user = crud.get_user_by_email(session=session, email=email)
+            user = await crud.get_user_by_email(session=session, email=email)
             
         if not user:
             record_user_operation(operation="password_recovery_html", status="user_not_found")
