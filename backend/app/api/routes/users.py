@@ -1,11 +1,12 @@
 import uuid
 from typing import Any
+import os
 
 from fastapi import APIRouter, Depends, HTTPException
 from sqlmodel import col, delete, func, select
 from opentelemetry import trace
 
-from app import crud
+from app import db_adapter as crud
 from app.api.deps import (
     CurrentUser,
     SessionDep,
@@ -37,7 +38,7 @@ router = APIRouter(prefix="/users", tags=["users"])
     response_model=UsersPublic,
 )
 @trace_function("read_users")
-def read_users(session: SessionDep, skip: int = 0, limit: int = 100) -> Any:
+async def read_users(session: SessionDep, skip: int = 0, limit: int = 100) -> Any:
     """
     Retrieve users.
     """
@@ -51,11 +52,17 @@ def read_users(session: SessionDep, skip: int = 0, limit: int = 100) -> Any:
             query_span.set_attribute("db.operation", "read")
             query_span.set_attribute("db.table", "users")
             
-            count_statement = select(func.count()).select_from(User)
-            count = session.exec(count_statement).one()
-
-            statement = select(User).offset(skip).limit(limit)
-            users = session.exec(statement).all()
+            # Adapt based on whether we're using Supabase or PostgreSQL
+            if os.getenv("SUPABASE_URL", ""):
+                # Use Supabase CRUD
+                users = await crud.get_users(skip=skip, limit=limit)
+                count = len(users)  # Approximate count for now
+            else:
+                # Use PostgreSQL CRUD
+                count_statement = select(func.count()).select_from(User)
+                count = session.exec(count_statement).one()
+                statement = select(User).offset(skip).limit(limit)
+                users = session.exec(statement).all()
             
             query_span.set_attribute("db.rows_fetched", len(users))
 
@@ -86,7 +93,7 @@ async def create_user(user_in: UserCreate, session: SessionDep) -> Any:
             query_span.set_attribute("db.operation", "read")
             query_span.set_attribute("db.table", "users")
             
-            user = crud.get_user_by_email(session=session, email=user_in.email)
+            user = await crud.get_user_by_email(session=session, email=user_in.email)
             
         if user:
             span.set_attribute("registration.status", "failure")
@@ -101,7 +108,7 @@ async def create_user(user_in: UserCreate, session: SessionDep) -> Any:
             query_span.set_attribute("db.operation", "create")
             query_span.set_attribute("db.table", "users")
             
-            user = crud.create_user(session=session, user_create=user_in)
+            user = await crud.create_user(session=session, user_create=user_in)
             query_span.set_attribute("user.id", str(user.id))
             
         # Send email if enabled
@@ -131,7 +138,7 @@ async def create_user(user_in: UserCreate, session: SessionDep) -> Any:
 
 @router.patch("/me", response_model=UserPublic)
 @trace_function("update_user_me")
-def update_user_me(
+async def update_user_me(
     *, session: SessionDep, user_in: UserUpdateMe, current_user: CurrentUser
 ) -> Any:
     """
@@ -146,7 +153,7 @@ def update_user_me(
                 query_span.set_attribute("db.operation", "read")
                 query_span.set_attribute("db.table", "users")
                 
-                existing_user = crud.get_user_by_email(session=session, email=user_in.email)
+                existing_user = await crud.get_user_by_email(session=session, email=user_in.email)
                 
             if existing_user and existing_user.id != current_user.id:
                 span.set_attribute("operation.status", "failure")
@@ -272,9 +279,7 @@ def delete_user_me(session: SessionDep, current_user: CurrentUser) -> Any:
 
 
 @router.post("/signup", response_model=UserPublic)
-@trace_function("register_user")
-@track_errors
-def register_user(session: SessionDep, user_in: UserRegister) -> Any:
+async def register_user(session: SessionDep, user_in: UserRegister) -> Any:  # Make this async
     """
     Create new user without the need to be logged in.
     """
@@ -287,7 +292,8 @@ def register_user(session: SessionDep, user_in: UserRegister) -> Any:
             query_span.set_attribute("db.operation", "read")
             query_span.set_attribute("db.table", "users")
             
-            user = crud.get_user_by_email(session=session, email=user_in.email)
+            # Use await here to properly resolve the coroutine
+            user = await crud.get_user_by_email(session=session, email=user_in.email)
             
         if user:
             span.set_attribute("registration.status", "failure")
@@ -303,7 +309,8 @@ def register_user(session: SessionDep, user_in: UserRegister) -> Any:
             query_span.set_attribute("db.table", "users")
             
             user_create = UserCreate.model_validate(user_in)
-            user = crud.create_user(session=session, user_create=user_create)
+            # Use await here too
+            user = await crud.create_user(session=session, user_create=user_create)
             query_span.set_attribute("user.id", str(user.id))
             
         span.set_attribute("registration.status", "success")
@@ -375,7 +382,7 @@ def read_user_by_id(
     response_model=UserPublic,
 )
 @trace_function("update_user_by_id")
-def update_user(
+async def update_user(
     *,
     session: SessionDep,
     user_id: uuid.UUID,
@@ -409,7 +416,7 @@ def update_user(
                 query_span.set_attribute("db.operation", "read")
                 query_span.set_attribute("db.table", "users")
                 
-                existing_user = crud.get_user_by_email(session=session, email=user_in.email)
+                existing_user = await crud.get_user_by_email(session=session, email=user_in.email)
                 query_span.set_attribute("email.exists", existing_user is not None)
                 
             if existing_user and existing_user.id != user_id:
@@ -424,7 +431,7 @@ def update_user(
             query_span.set_attribute("db.operation", "update")
             query_span.set_attribute("db.table", "users")
             
-            db_user = crud.update_user(session=session, db_user=db_user, user_in=user_in)
+            db_user = await crud.update_user(session=session, db_user=db_user, user_in=user_in)
             
         span.set_attribute("operation.status", "success")
         span.set_attribute("operation.type", "update_other")

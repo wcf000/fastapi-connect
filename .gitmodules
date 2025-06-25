@@ -29,3 +29,6 @@
 [submodule "backend/app/model_context_protocol"]
 	path = backend/app/model_context_protocol
 	url = https://github.com/wcf000/lightspeed_mcp.git
+[submodule "backend/app/core/locust_load_test"]
+	path = backend/app/core/locust_load_test
+	url = https://github.com/wcf000/locust-load-test.git
